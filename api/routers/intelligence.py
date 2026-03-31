@@ -9,6 +9,7 @@ from api.auth import verify_api_key
 from api.deps import get_db
 from models.news_intelligence import Edge, Impact, Node, Signal, TimelineEntry
 from pipeline.main_pipeline import run_full_pipeline
+from pipeline.validation import run_validation
 
 logger = logging.getLogger(__name__)
 
@@ -268,3 +269,17 @@ def trigger_pipeline(background_tasks: BackgroundTasks) -> dict[str, object]:
 def get_pipeline_status() -> dict[str, object]:
     """Return the current pipeline execution status."""
     return {"status": dict(_pipeline_status)}
+
+
+@router.get("/pipeline/validate")
+def validate_pipeline(db: Session = Depends(get_db)) -> dict[str, object]:
+    """Run all validation checks on the current pipeline data.
+
+    Returns a structured report with:
+    - health: 'healthy' | 'warnings' | 'errors'
+    - stats: row counts for all tables
+    - issues: detailed list of every issue found
+    """
+    report = run_validation(db=db)
+    return {"validation": report}
+

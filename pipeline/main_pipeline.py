@@ -12,6 +12,7 @@ from ingestion.service import insert_raw_news
 from preprocessing.service import preprocess_and_store
 from signal_detection.service import detect_and_store_signals
 from timeline.service import build_timeline
+from pipeline.validation import run_validation
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def run_full_pipeline() -> dict[str, object]:
     5) expansion
     6) impact analysis
     7) signal detection
+    8) validation (consistency checks)
     """
     create_tables()
     summary: dict[str, object] = {"status": "ok", "steps": {}}
@@ -116,6 +118,17 @@ def run_full_pipeline() -> dict[str, object]:
             if step_result["status"] == "error":
                 summary["status"] = "error"
                 break
+
+        # Step 8: Validation (always runs, even if earlier steps failed)
+        validation_report = _run_step(
+            "step_8_validation",
+            lambda: run_validation(db=db),
+        )
+        summary["steps"]["step_8_validation"] = validation_report
+        summary["validation_health"] = (
+            validation_report.get("result", {}).get("health", "unknown")
+            if validation_report["status"] == "ok" else "error"
+        )
 
     return summary
 
