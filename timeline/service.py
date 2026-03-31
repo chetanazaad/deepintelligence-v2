@@ -168,17 +168,26 @@ def build_timeline(db: Session, max_clusters: int = 200) -> dict[str, int | str]
     anchor_cluster_id = int(cluster_stats[0]["cluster_id"])
     anchor_cluster_key = str(cluster_stats[0]["cluster_key"])
 
+    # ---- Batch-fetch titles for all clusters in one query ----
+    all_cluster_ids = [int(info["cluster_id"]) for info in cluster_stats]
+    title_rows = db.execute(
+        select(ClusterNewsMap.cluster_id, RawNews.title)
+        .join(CleanedNews, CleanedNews.id == ClusterNewsMap.cleaned_news_id)
+        .join(RawNews, RawNews.id == CleanedNews.raw_news_id)
+        .where(ClusterNewsMap.cluster_id.in_(all_cluster_ids))
+        .order_by(ClusterNewsMap.cluster_id, RawNews.created_at.desc())
+    ).all()
+
+    from collections import defaultdict
+    titles_by_cluster: dict[int, list[str]] = defaultdict(list)
+    for row in title_rows:
+        if len(titles_by_cluster[row[0]]) < 3:
+            titles_by_cluster[row[0]].append(row[1])
+
     nodes: list[Node] = []
     for info in cluster_stats:
         cluster_id = int(info["cluster_id"])
-        titles = db.execute(
-            select(RawNews.title)
-            .join(CleanedNews, CleanedNews.raw_news_id == RawNews.id)
-            .join(ClusterNewsMap, ClusterNewsMap.cleaned_news_id == CleanedNews.id)
-            .where(ClusterNewsMap.cluster_id == cluster_id)
-            .order_by(RawNews.created_at.desc())
-            .limit(3)
-        ).scalars().all()
+        titles = titles_by_cluster.get(cluster_id, [])
 
         main_topic = str(info["main_topic"])
         description = " | ".join([t for t in titles if t]) or main_topic
@@ -204,10 +213,13 @@ def build_timeline(db: Session, max_clusters: int = 200) -> dict[str, int | str]
         anchor_node = nodes.pop(anchor_index)
         nodes.insert(0, anchor_node)
 
+    # ---- Scoped edge dedup: only load edges for nodes in current timeline ----
+    current_node_ids = [n.id for n in nodes]
     existing_edges = {
         (from_id, to_id, relation)
         for from_id, to_id, relation in db.execute(
             select(Edge.from_node_id, Edge.to_node_id, Edge.relation_type)
+            .where(Edge.from_node_id.in_(current_node_ids))
         ).all()
     }
 

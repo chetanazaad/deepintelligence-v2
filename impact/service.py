@@ -94,18 +94,25 @@ def _upsert_impact(
 
 def analyze_impact(db: Session, limit: int = 500) -> dict[str, int]:
     """
-    Deterministic impact analysis:
+    Deterministic impact analysis (incremental):
+    - only processes nodes that do NOT already have an impact entry
     - classify each node as supply/demand/policy/financial
     - assign short/long-term winners and losers via fixed rules
     - store results in impact table
     """
     rows = (
-        db.execute(select(Node).order_by(Node.created_at.asc(), Node.id.asc()).limit(limit))
+        db.execute(
+            select(Node)
+            .outerjoin(Impact, Impact.node_id == Node.id)
+            .where(Impact.id.is_(None))
+            .order_by(Node.created_at.asc(), Node.id.asc())
+            .limit(limit)
+        )
         .scalars()
         .all()
     )
     if not rows:
-        return {"processed_nodes": 0, "impact_rows_written": 0}
+        return {"processed_nodes": 0, "impact_rows_written": 0, "skipped_existing": 0}
 
     impact_rows_written = 0
     for node in rows:

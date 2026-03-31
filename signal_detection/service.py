@@ -63,16 +63,23 @@ def _cluster_source_time_stats(db: Session, cluster_id: int) -> tuple[int, datet
 
 def detect_and_store_signals(db: Session, limit: int = 500) -> dict[str, int]:
     """
-    Deterministic signal detection.
+    Deterministic signal detection (incremental).
+    Only processes nodes that do NOT already have signal entries.
     Signals represent uncertain cues (not facts) such as: may/could/expected/concerns/pressure.
     """
     nodes = (
-        db.execute(select(Node).order_by(Node.created_at.asc(), Node.id.asc()).limit(limit))
+        db.execute(
+            select(Node)
+            .outerjoin(Signal, Signal.node_id == Node.id)
+            .where(Signal.id.is_(None))
+            .order_by(Node.created_at.asc(), Node.id.asc())
+            .limit(limit)
+        )
         .scalars()
         .all()
     )
     if not nodes:
-        return {"processed_nodes": 0, "signals_written": 0}
+        return {"processed_nodes": 0, "signals_written": 0, "skipped_existing": 0}
 
     signals_written = 0
 
