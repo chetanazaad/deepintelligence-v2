@@ -1,15 +1,53 @@
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from api.auth import verify_api_key
 from api.deps import get_db
 from models.news_intelligence import Edge, Impact, Node, Signal, TimelineEntry
 from pipeline.main_pipeline import run_full_pipeline
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["intelligence"])
 
+# ---------------------------------------------------------------------------
+# In-memory pipeline status tracker
+# ---------------------------------------------------------------------------
+_pipeline_status: dict[str, object] = {
+    "state": "idle",
+    "last_run_time": None,
+    "last_result": None,
+    "error": None,
+}
+
+
+def _run_pipeline_background() -> None:
+    """Execute the full pipeline in a background thread with error handling."""
+    global _pipeline_status
+    _pipeline_status = {
+        "state": "running",
+        "last_run_time": datetime.now(timezone.utc).isoformat(),
+        "last_result": None,
+        "error": None,
+    }
+    try:
+        result = run_full_pipeline()
+        _pipeline_status["state"] = "completed"
+        _pipeline_status["last_result"] = result
+        logger.info("Pipeline completed successfully.")
+    except Exception as exc:  # noqa: BLE001
+        _pipeline_status["state"] = "failed"
+        _pipeline_status["error"] = str(exc)
+        logger.exception("Pipeline execution failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Helper formatters (unchanged)
+# ---------------------------------------------------------------------------
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else None
@@ -99,6 +137,10 @@ def _signals_payload(db: Session, node_id: int) -> dict[str, object]:
         "explanation": "Detected from uncertainty phrases and cross-source frequency.",
     }
 
+
+# ---------------------------------------------------------------------------
+# Read endpoints (unchanged)
+# ---------------------------------------------------------------------------
 
 @router.get("/event")
 def get_event(
@@ -197,14 +239,32 @@ def get_signals(id: int, db: Session = Depends(get_db)) -> dict[str, object]:
     return {"node_id": id, "signals": _signals_payload(db, id)}
 
 
-@router.post("/pipeline/run")
-def run_pipeline() -> dict[str, object]:
+# ---------------------------------------------------------------------------
+# Pipeline endpoints (protected + async)
+# ---------------------------------------------------------------------------
+
+@router.post("/pipeline/run", dependencies=[Depends(verify_api_key)])
+def trigger_pipeline(background_tasks: BackgroundTasks) -> dict[str, object]:
     """
-    Trigger full deterministic pipeline execution and return step-by-step status.
+    Trigger full deterministic pipeline in the background.
+
+    Protected by API key (X-API-Key header).
+    Returns immediately; poll GET /pipeline/status for progress.
     """
-    result = run_full_pipeline()
+    if _pipeline_status["state"] == "running":
+        return {
+            "message": "Pipeline is already running. Please wait for it to finish.",
+            "status": dict(_pipeline_status),
+        }
+
+    background_tasks.add_task(_run_pipeline_background)
     return {
-        "message": "Pipeline execution finished.",
-        "result": result,
-        "explanation": "Runs ingestion -> preprocessing -> clustering -> timeline -> expansion -> impact -> signals.",
+        "message": "Pipeline started in background.",
+        "explanation": "Poll GET /pipeline/status to monitor progress.",
     }
+
+
+@router.get("/pipeline/status")
+def get_pipeline_status() -> dict[str, object]:
+    """Return the current pipeline execution status."""
+    return {"status": dict(_pipeline_status)}

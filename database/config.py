@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     db_password: str = Field(alias="DB_PASSWORD")
     db_sslmode: str = Field(default="prefer", alias="DB_SSLMODE")
 
+    api_key: str = Field(default="", alias="API_KEY")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

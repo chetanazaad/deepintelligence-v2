@@ -1,6 +1,12 @@
+import logging
+import socket
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
 import feedparser
+
+logger = logging.getLogger(__name__)
 
 
 def _to_datetime_utc(value: object) -> datetime | None:
@@ -20,11 +26,28 @@ def _to_datetime_utc(value: object) -> datetime | None:
     return None
 
 
-def fetch_rss_feed(feed_url: str, source: str) -> list[dict[str, object]]:
+def fetch_rss_feed(feed_url: str, source: str, timeout: int = 15) -> list[dict[str, object]]:
     """
     Fetch RSS entries and normalize into deterministic dictionaries.
+
+    Applies a network timeout and catches errors so a single failed feed
+    never crashes the pipeline.
     """
-    parsed = feedparser.parse(feed_url)
+    try:
+        response = urllib.request.urlopen(feed_url, timeout=timeout)
+        raw_data = response.read()
+        parsed = feedparser.parse(raw_data)
+    except (urllib.error.URLError, socket.timeout, OSError) as exc:
+        logger.warning("Network error fetching RSS feed %s: %s", feed_url, exc)
+        return []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Unexpected error fetching RSS feed %s: %s", feed_url, exc)
+        return []
+
+    if parsed.bozo and not parsed.entries:
+        logger.warning("Malformed feed %s: %s", feed_url, parsed.bozo_exception)
+        return []
+
     items: list[dict[str, object]] = []
 
     for entry in parsed.entries:
@@ -46,4 +69,5 @@ def fetch_rss_feed(feed_url: str, source: str) -> list[dict[str, object]]:
             }
         )
 
+    logger.info("Fetched %d entries from %s (%s)", len(items), source, feed_url)
     return items
