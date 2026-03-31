@@ -1,0 +1,1 @@
+"""Impact scoring module."""
