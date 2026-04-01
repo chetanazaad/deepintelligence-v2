@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timezone
 from hashlib import sha256
-from re import findall
+from re import findall, search, IGNORECASE
 
 from utils.datetime_helpers import ensure_utc
 
@@ -271,6 +271,99 @@ def _build_timeline_group_id(anchor_cluster_key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Causal Event Extraction & Backward Inference (New Intelligence Paradigm)
+# ---------------------------------------------------------------------------
+
+_CAUSAL_PATTERNS = [
+    # (Regex pattern, Relation Type, Position of Effect vs Cause)
+    (r"\b(due to)\b", "caused_by", "left_effect"),
+    (r"\b(because of)\b", "caused_by", "left_effect"),
+    (r"\b(after)\b", "precedes", "left_effect"),
+    (r"\b(following)\b", "precedes", "left_effect"),
+    (r"\b(triggered by)\b", "triggered_by", "left_effect"),
+    (r"\b(sparked by)\b", "triggered_by", "left_effect"),
+    (r"\b(amid)\b", "enables", "left_effect"),
+    (r"\b(as a result of)\b", "caused_by", "left_effect"),
+    (r"\b(caused by)\b", "caused_by", "left_effect"),
+    (r"\b(leads to)\b", "causes", "right_effect"),
+    (r"\b(sparks)\b", "triggers", "right_effect"),
+    (r"\b(triggers)\b", "triggers", "right_effect"),
+    (r"\b(escalates)\b", "amplifies", "right_effect"),
+    (r"\b(prompts)\b", "triggers", "right_effect"),
+    (r"\b(fuels)\b", "amplifies", "right_effect"),
+]
+
+def _extract_causal_primitives(titles: list[str], entity: str) -> dict[str, str | float]:
+    """Extract causal primitives (Actor, Target, Trigger, Predecessor) from text.
+    Works backward from surfaced news to find the true causal chain.
+    """
+    best_extraction = None
+    best_score = 0.0
+
+    for title in titles:
+        for pattern, rel_type, format_dir in _CAUSAL_PATTERNS:
+            match = search(pattern, title, IGNORECASE)
+            if match:
+                trigger_phrase = match.group(1).lower()
+                left_part = title[:match.start()].strip()
+                right_part = title[match.end():].strip()
+
+                if format_dir == "left_effect":
+                    event = left_part
+                    predecessor = right_part
+                else:
+                    event = right_part
+                    predecessor = left_part
+                
+                # We prioritize titles that contain the extracted entity
+                score = 0.8
+                if entity and entity.lower() in event.lower():
+                    score += 0.15
+                
+                if score > best_score:
+                    best_score = score
+                    best_extraction = {
+                        "event": event or title,
+                        "actor": entity,
+                        "trigger_phrase": trigger_phrase,
+                        "predecessor": predecessor,
+                        "confidence": score,
+                        "raw_evidence": title
+                    }
+                    
+    if not best_extraction:
+        # Fallback: Treat the whole string as an atomic event with no known predecessor
+        best_title = titles[0] if titles else "Unknown Event"
+        best_extraction = {
+            "event": best_title,
+            "actor": entity,
+            "trigger_phrase": "N/A",
+            "predecessor": "N/A",
+            "confidence": 0.5,
+            "raw_evidence": best_title
+        }
+        
+    return best_extraction
+
+def _format_node_description(primitives: dict[str, str | float], all_titles: list[str]) -> str:
+    """Format structured debug output mapping the causal logic.
+    Provides explainability constraints for the intelligence graph.
+    """
+    lines = [
+        f"EVENT: {primitives.get('event', '')}",
+        f"ACTOR: {primitives.get('actor', '')}",
+        f"TRIGGER: {primitives.get('trigger_phrase', 'N/A')}",
+        f"PREDECESSOR: {primitives.get('predecessor', 'N/A')}",
+        f"CONFIDENCE: {float(primitives.get('confidence', 0.0)):.2f}",
+        f"EVIDENCE: \"{primitives.get('raw_evidence', '')}\"",
+        "---",
+        "ORIGINAL TITLES:",
+    ]
+    lines.extend([f"- {t}" for t in all_titles[:3]])
+    return "\\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Event-type classification (improved)
 # ---------------------------------------------------------------------------
 
@@ -360,23 +453,50 @@ def _compute_edge_score(
     from_node: Node,
     to_node: Node,
 ) -> tuple[str, float]:
-    """Compute relation type and confidence score from 3 independent signals.
+    """Compute backward-link reasoning from effect (from_node) to cause (to_node).
 
-    Weights:
-    - Keyword strength: 0.45 (strongest indicator of causality)
-    - Temporal proximity: 0.30 (closer events = stronger link)
-    - Entity overlap:     0.25 (shared entities suggest connection)
-
-    Returns (relation_type, combined_confidence).
+    1. Checks for EXPLICIT backward trigger phrases derived from the node's text.
+    2. Falls back to keyword signal + temporal proximity + entity overlap.
     """
     from_text = from_node.description or ""
     to_text = to_node.description or ""
+    
+    # 1. Parse structured debug output to check for explicit predecessors
+    pred_match = search(r"PREDECESSOR:\s*(.+)", from_text)
+    predecessor = pred_match.group(1).strip() if pred_match else "N/A"
+    
+    if predecessor != "N/A" and len(predecessor) > 4:
+        # Does the older node's content describe this predecessor event?
+        pred_terms = _extract_terms(predecessor)
+        to_terms = _extract_terms(to_text)
+        
+        overlap_factor = len(pred_terms & to_terms)
+        trigger_match = search(r"TRIGGER:\s*(.+)", from_text)
+        trigger_phrase = trigger_match.group(1).strip() if trigger_match else ""
+        
+        # We also check if the older node contains the predecessor string directly
+        direct_match = predecessor.lower() in to_text.lower()
+        
+        if overlap_factor > 1 or direct_match:
+            # We found a strong back-link matching the text's stated cause!
+            rel = "causes"
+            if trigger_phrase in ["triggered by", "sparked by"]:
+                rel = "triggers"
+            elif trigger_phrase in ["after", "following"]:
+                rel = "precedes"
+            elif trigger_phrase in ["amid"]:
+                rel = "enables"
+            
+            temporal = _temporal_signal(from_node.timestamp, to_node.timestamp)
+            confidence = min(0.95, 0.60 + (0.1 * overlap_factor) + (0.15 * temporal))
+            return rel, round(confidence, 3)
 
+    # 2. Fallback to statistical causal keyword guessing (original logic)
     relation_type, keyword_strength = _keyword_signal(from_text, to_text)
     temporal = _temporal_signal(from_node.timestamp, to_node.timestamp)
-    entity = _entity_signal(from_text, to_text)
+    entity_val = _entity_signal(from_text, to_text)
 
-    confidence = (0.45 * keyword_strength) + (0.30 * temporal) + (0.25 * entity)
+    confidence = (0.45 * keyword_strength) + (0.30 * temporal) + (0.25 * entity_val)
     return relation_type, round(confidence, 3)
 
 
@@ -446,9 +566,14 @@ def _batch_get_or_create_nodes(
         titles = titles_by_cluster.get(cluster_id, [])
 
         main_topic = str(info["main_topic"])
-        description = " | ".join([t for t in titles if t]) or main_topic
-        event_type = _event_type(f"{main_topic} {description}")
         entity = _extract_entity_for_node(main_topic, titles)
+        
+        # Replace article-summary logic with causal primitive extraction
+        primitives = _extract_causal_primitives(titles, entity)
+        description = _format_node_description(primitives, titles)
+        
+        # Classify the primary event type based on the extracted event and cause strings
+        event_type = _event_type(f"{primitives['event']} {primitives['predecessor']}")
         timestamp = info["latest_ts"] if isinstance(info["latest_ts"], datetime) else None
         is_anchor = (cluster_id == anchor_cluster_id)
 
