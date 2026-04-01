@@ -376,6 +376,26 @@ def _tokenize_query(query: str) -> tuple[list[str], list[str]]:
     return list(set(base)), list(set(synonyms))
 
 
+def _extract_core_keywords(base_kws: list[str]) -> list[str]:
+    """Extract core keywords — entities, locations, and important nouns.
+
+    Core keywords are non-low-weight words with 3+ characters.
+    These define the *topic* of the query and are used for coherence filtering.
+    Example: "UAE wants to help US force Hormuz open" → ["uae", "hormuz"]
+    """
+    core = []
+    for kw in base_kws:
+        if kw not in _LOW_WEIGHT_WORDS and len(kw) >= 3:
+            core.append(kw)
+    # If no long-enough core keywords, fall back to all non-low-weight base keywords
+    if not core:
+        core = [kw for kw in base_kws if kw not in _LOW_WEIGHT_WORDS]
+    # Last resort: use all base keywords
+    if not core:
+        core = list(base_kws)
+    return core
+
+
 @router.get("/event")
 def get_event(
     query: str = Query(..., min_length=2, description="Search term for entity, event, or topic"),
@@ -387,6 +407,7 @@ def get_event(
     Splits query into tokens, applies synonym mapping, and searches across:
     entity, event_type, description, AND cluster main_topic.
     Results ranked by: keyword matches > exact match > recency.
+    Topic coherence filtering ensures results belong to the query's theme.
     """
     search_term = query.strip().lower()
     base_kws, syn_kws = _tokenize_query(search_term)
@@ -394,6 +415,9 @@ def get_event(
     # Fallback to the full term if tokenizer stripped everything
     if not base_kws:
         base_kws = [search_term]
+
+    # Identify core keywords for coherence filtering
+    core_kws = _extract_core_keywords(base_kws)
 
     # Construct SQLAlchemy OR conditions
     conditions = []
@@ -445,30 +469,47 @@ def get_event(
         matched_kws = 0
         strong_matches = 0
         
+        # Track WHERE core keywords matched (for coherence filtering)
+        core_in_entity = 0
+        core_in_topic = 0
+        core_in_desc_only = 0
+        
         all_kws = [(kw, False) for kw in base_kws] + [(kw, True) for kw in syn_kws]
         
         for kw, is_synonym in all_kws:
             kw_matched = False
             is_low_weight = kw in _LOW_WEIGHT_WORDS
+            is_core = kw in core_kws
+            
+            hit_entity = kw in entity_lower
+            hit_topic = (not is_synonym) and (kw in topic_lower)
+            hit_desc = (not is_synonym) and (kw in desc_lower)
             
             # Entity matching (Dominant)
-            if kw in entity_lower:
+            if hit_entity:
                 score += 0.5 if is_low_weight else 10.0
                 kw_matched = True
                 if not is_low_weight:
                     strong_matches += 1
+                if is_core:
+                    core_in_entity += 1
             
             # Topic & Desc matching (Synonyms do NOT apply here)
             if not is_synonym:
-                if kw in topic_lower:
+                if hit_topic:
                     score += 0.5 if is_low_weight else 5.0
                     kw_matched = True
                     if not is_low_weight:
                         strong_matches += 1
+                    if is_core:
+                        core_in_topic += 1
                         
-                if kw in desc_lower:
+                if hit_desc:
                     score += 0.2 if is_low_weight else 2.0
                     kw_matched = True
+                    # Track if this core keyword matched ONLY in description
+                    if is_core and not hit_entity and not hit_topic:
+                        core_in_desc_only += 1
                     
             if kw_matched:
                 matched_kws += 1
@@ -485,6 +526,31 @@ def get_event(
         if strong_matches == 0:
             score *= 0.1
 
+        # -----------------------------------------------------------------
+        # TOPIC COHERENCE LAYER (added on top of existing scoring)
+        # -----------------------------------------------------------------
+        total_core_hits = core_in_entity + core_in_topic + core_in_desc_only
+        
+        # HARD FILTER: result MUST contain at least one core keyword
+        # somewhere (entity, topic, or description)
+        if total_core_hits == 0:
+            continue
+        
+        # If core keywords matched ONLY in description (not entity/topic),
+        # apply heavy penalty — this is a weak contextual match
+        if core_in_entity == 0 and core_in_topic == 0 and core_in_desc_only > 0:
+            score *= 0.15
+        
+        # Coherence ratio boost: reward results that match many core keywords
+        if len(core_kws) > 1:
+            coherence_ratio = total_core_hits / len(core_kws)
+            score += coherence_ratio * 10.0  # up to +10 for perfect coherence
+        
+        # Entity dominance enforcement: results with core keywords in entity
+        # get a massive boost to always outrank generic matches
+        if core_in_entity > 0:
+            score += core_in_entity * 8.0
+
         # 4. Recency bonus
         if node.timestamp:
             age_days = (datetime.now(timezone.utc) - ensure_utc(node.timestamp)).total_seconds() / 86400.0
@@ -498,7 +564,7 @@ def get_event(
 
     scored.sort(key=lambda x: x[0], reverse=True)
     
-        # Take the best unique nodes (since multiple cluster topic rows might theoretically duplicate nodes)
+    # Take the best unique nodes
     top_nodes = []
     seen = set()
     for _, node in scored:
