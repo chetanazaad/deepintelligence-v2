@@ -79,9 +79,190 @@ def _extract_terms(text: str) -> set[str]:
     return {token.lower() for token in findall(r"[a-zA-Z0-9]{3,}", text or "")}
 
 
+# ---------------------------------------------------------------------------
+# Entity extraction & normalization (rule-based, no ML/LLM)
+# ---------------------------------------------------------------------------
+
+_GENERIC_WORDS = {
+    "how", "what", "why", "this", "that", "which", "where", "when", "who",
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+    "her", "was", "one", "our", "out", "has", "his", "its", "new", "now",
+    "old", "see", "way", "may", "day", "too", "use", "say", "says", "said",
+    "will", "each", "make", "like", "long", "look", "many", "some", "than",
+    "them", "then", "were", "been", "have", "from", "with", "they", "been",
+    "more", "over", "such", "also", "back", "into", "year", "your", "just",
+    "know", "take", "come", "could", "after", "about", "would", "being",
+    "their", "there", "other", "should", "world", "still", "think", "here",
+    "much", "only", "well", "very", "even", "most", "news", "report",
+    "update", "breaking", "latest", "first", "last", "top", "big", "key",
+    "live", "watch", "read", "full", "set", "gets", "got",
+}
+
+# Priority: 3 = location/region, 2 = country, 1 = organization
+_KNOWN_ENTITIES: dict[str, tuple[str, int]] = {
+    # --- Countries (priority 2) ---
+    "india": ("India", 2), "iran": ("Iran", 2), "iraq": ("Iraq", 2),
+    "israel": ("Israel", 2), "china": ("China", 2), "russia": ("Russia", 2),
+    "ukraine": ("Ukraine", 2), "pakistan": ("Pakistan", 2),
+    "japan": ("Japan", 2), "germany": ("Germany", 2), "france": ("France", 2),
+    "brazil": ("Brazil", 2), "turkey": ("Turkey", 2), "egypt": ("Egypt", 2),
+    "syria": ("Syria", 2), "yemen": ("Yemen", 2), "lebanon": ("Lebanon", 2),
+    "afghanistan": ("Afghanistan", 2), "mexico": ("Mexico", 2),
+    "canada": ("Canada", 2), "australia": ("Australia", 2),
+    "indonesia": ("Indonesia", 2), "nigeria": ("Nigeria", 2),
+    "bangladesh": ("Bangladesh", 2), "taiwan": ("Taiwan", 2),
+    "myanmar": ("Myanmar", 2), "sudan": ("Sudan", 2),
+    "ethiopia": ("Ethiopia", 2), "colombia": ("Colombia", 2),
+    "argentina": ("Argentina", 2), "venezuela": ("Venezuela", 2),
+    "libya": ("Libya", 2), "somalia": ("Somalia", 2),
+    "thailand": ("Thailand", 2), "vietnam": ("Vietnam", 2),
+    "korea": ("Korea", 2), "nepal": ("Nepal", 2),
+    "sri lanka": ("Sri Lanka", 2),
+    # --- Abbreviation countries (priority 2) ---
+    "uae": ("United Arab Emirates", 2),
+    "us": ("United States", 2), "usa": ("United States", 2),
+    "uk": ("United Kingdom", 2),
+    # --- Locations/Regions (priority 3 — highest) ---
+    "hormuz": ("Strait of Hormuz", 3), "strait": ("Strait of Hormuz", 3),
+    "gaza": ("Gaza", 3), "kashmir": ("Kashmir", 3),
+    "crimea": ("Crimea", 3), "tibet": ("Tibet", 3),
+    "arctic": ("Arctic", 3), "sahel": ("Sahel", 3),
+    "balkans": ("Balkans", 3), "caucasus": ("Caucasus", 3),
+    "gulf": ("Persian Gulf", 3), "persian": ("Persian Gulf", 3),
+    "mediterranean": ("Mediterranean", 3), "atlantic": ("Atlantic", 3),
+    "pacific": ("Pacific", 3), "suez": ("Suez Canal", 3),
+    "taiwan strait": ("Taiwan Strait", 3),
+    "south china sea": ("South China Sea", 3),
+    "red sea": ("Red Sea", 3),
+    "black sea": ("Black Sea", 3),
+    "middle east": ("Middle East", 3),
+    "southeast asia": ("Southeast Asia", 3),
+    "central asia": ("Central Asia", 3),
+    "east africa": ("East Africa", 3),
+    "west africa": ("West Africa", 3),
+    "europe": ("Europe", 3), "asia": ("Asia", 3), "africa": ("Africa", 3),
+    "americas": ("Americas", 3),
+    # --- Organizations (priority 1) ---
+    "un": ("United Nations", 1), "nato": ("NATO", 1),
+    "opec": ("OPEC", 1), "who": ("WHO", 1), "imf": ("IMF", 1),
+    "fed": ("Federal Reserve", 1), "ecb": ("ECB", 1),
+    "rbi": ("RBI", 1), "brics": ("BRICS", 1),
+    "asean": ("ASEAN", 1), "g7": ("G7", 1), "g20": ("G20", 1),
+    "hamas": ("Hamas", 1), "hezbollah": ("Hezbollah", 1),
+    "taliban": ("Taliban", 1), "isis": ("ISIS", 1),
+    "pentagon": ("Pentagon", 1), "kremlin": ("Kremlin", 1),
+    "congress": ("US Congress", 1), "parliament": ("Parliament", 1),
+    "supreme court": ("Supreme Court", 1),
+    "white house": ("White House", 1),
+}
+
+
+def _extract_entities_from_text(text: str) -> list[tuple[str, int]]:
+    """Extract entities from text using known-entity lookup + capitalized-word heuristic.
+
+    Returns list of (normalized_entity, priority) tuples, deduplicated.
+    """
+    if not text:
+        return []
+
+    text_lower = text.lower()
+    found: dict[str, int] = {}  # normalized_name -> priority
+
+    # 1. Check multi-word known entities first (longest match)
+    for key, (normalized, priority) in _KNOWN_ENTITIES.items():
+        if " " in key and key in text_lower:
+            if normalized not in found or priority > found[normalized]:
+                found[normalized] = priority
+
+    # 2. Check single-word known entities
+    words_lower = findall(r"[a-z0-9]+", text_lower)
+    for word in words_lower:
+        if word in _KNOWN_ENTITIES:
+            normalized, priority = _KNOWN_ENTITIES[word]
+            if normalized not in found or priority > found[normalized]:
+                found[normalized] = priority
+
+    # 3. Capitalized-word heuristic for unknown entities (from original text)
+    #    Captures proper nouns like "Modi", "Biden", "Samsung", "Gazprom"
+    cap_words = findall(r"\b[A-Z][a-z]{2,}\b", text)
+    for word in cap_words:
+        wl = word.lower()
+        if wl not in _GENERIC_WORDS and wl not in _KNOWN_ENTITIES:
+            if word not in found:
+                found[word] = 0  # priority 0 = generic proper noun
+
+    return [(name, pri) for name, pri in found.items()]
+
+
+def _select_primary_entity(entities: list[tuple[str, int]]) -> str:
+    """Select the best entity by priority: location(3) > country(2) > org(1) > proper noun(0)."""
+    if not entities:
+        return "event"
+    entities.sort(key=lambda x: x[1], reverse=True)
+    return entities[0][0]
+
+
+def _format_multi_entity(entities: list[tuple[str, int]], max_entities: int = 3) -> str:
+    """Format multiple entities as comma-separated string, priority-sorted.
+
+    Stored in the existing Node.entity field (no schema change).
+    """
+    if not entities:
+        return "event"
+    entities.sort(key=lambda x: x[1], reverse=True)
+    unique = []
+    seen = set()
+    for name, _ in entities:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
+            if len(unique) >= max_entities:
+                break
+    return ", ".join(unique)
+
+
 def _entity_from_topic(topic: str) -> str:
-    words = [w for w in topic.split() if w.strip()]
+    """Legacy wrapper — extract entity from topic string only.
+
+    Used as fallback when no titles are available.
+    """
+    entities = _extract_entities_from_text(topic)
+    if entities:
+        return _format_multi_entity(entities)
+    # Fallback: first non-generic word
+    words = [w for w in topic.split() if w.strip().lower() not in _GENERIC_WORDS]
     return words[0] if words else "event"
+
+
+def _extract_entity_for_node(main_topic: str, titles: list[str]) -> str:
+    """Extract the best entity from titles + topic combined.
+
+    Pipeline:
+    1. Extract from all titles (richest source)
+    2. Extract from cluster main_topic
+    3. Merge, deduplicate, and priority-rank
+    4. Return top entities as comma-separated string
+    """
+    all_entities: dict[str, int] = {}
+
+    # Titles are the richest entity source
+    for title in titles:
+        for name, priority in _extract_entities_from_text(title):
+            if name not in all_entities or priority > all_entities[name]:
+                all_entities[name] = priority
+
+    # Also check cluster topic
+    for name, priority in _extract_entities_from_text(main_topic):
+        if name not in all_entities or priority > all_entities[name]:
+            all_entities[name] = priority
+
+    entity_list = [(name, pri) for name, pri in all_entities.items()]
+
+    if entity_list:
+        return _format_multi_entity(entity_list)
+
+    # Fallback to cluster topic's first non-generic word
+    return _entity_from_topic(main_topic)
 
 
 def _build_timeline_group_id(anchor_cluster_key: str) -> str:
@@ -267,7 +448,7 @@ def _batch_get_or_create_nodes(
         main_topic = str(info["main_topic"])
         description = " | ".join([t for t in titles if t]) or main_topic
         event_type = _event_type(f"{main_topic} {description}")
-        entity = _entity_from_topic(main_topic)
+        entity = _extract_entity_for_node(main_topic, titles)
         timestamp = info["latest_ts"] if isinstance(info["latest_ts"], datetime) else None
         is_anchor = (cluster_id == anchor_cluster_id)
 
