@@ -360,7 +360,7 @@ def _format_node_description(primitives: dict[str, str | float], all_titles: lis
         "ORIGINAL TITLES:",
     ]
     lines.extend([f"- {t}" for t in all_titles[:3]])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -455,8 +455,8 @@ def _compute_edge_score(
 ) -> tuple[str, float]:
     """Compute backward-link reasoning from effect (from_node) to cause (to_node).
 
-    1. Checks for EXPLICIT backward trigger phrases derived from the node's text.
-    2. Falls back to keyword signal + temporal proximity + entity overlap.
+    1. EXPLICIT: Checks for backward trigger phrases parsed from the text.
+    2. IMPLICIT: Infers missing predecessors using temporal + semantic + entity logic.
     """
     from_text = from_node.description or ""
     to_text = to_node.description or ""
@@ -465,7 +465,7 @@ def _compute_edge_score(
     pred_match = search(r"PREDECESSOR:\s*(.+)", from_text)
     predecessor = pred_match.group(1).strip() if pred_match else "N/A"
     
-    if predecessor != "N/A" and len(predecessor) > 4:
+    if predecessor != "N/A" and not predecessor.startswith("[INFERRED]") and len(predecessor) > 4:
         # Does the older node's content describe this predecessor event?
         pred_terms = _extract_terms(predecessor)
         to_terms = _extract_terms(to_text)
@@ -488,15 +488,54 @@ def _compute_edge_score(
                 rel = "enables"
             
             temporal = _temporal_signal(from_node.timestamp, to_node.timestamp)
-            confidence = min(0.95, 0.60 + (0.1 * overlap_factor) + (0.15 * temporal))
+            confidence = min(0.99, 0.70 + (0.1 * overlap_factor) + (0.15 * temporal))
             return rel, round(confidence, 3)
 
-    # 2. Fallback to statistical causal keyword guessing (original logic)
+    # 2. IMPLICIT Causal Inference (Multi-Node / Multi-Hop Bridging)
     relation_type, keyword_strength = _keyword_signal(from_text, to_text)
     temporal = _temporal_signal(from_node.timestamp, to_node.timestamp)
     entity_val = _entity_signal(from_text, to_text)
+    
+    # If no explicit predecessor is stated, actively try to infer one
+    if predecessor == "N/A" or predecessor.startswith("[INFERRED]"):
+        # If they share entities strongly and occurred closely in time
+        if entity_val > 0.05 and temporal > 0.5:
+            is_logical_flow = False
+            inferred_rel = relation_type
+            
+            # Check Semantic Similarity / Causal Directionality (Action -> Reaction)
+            if from_node.event_type in ["reaction", "update"] and to_node.event_type in ["trigger", "causal"]:
+                is_logical_flow = True
+                inferred_rel = "causes"
+            elif keyword_strength > 0.6:
+                is_logical_flow = True
+                
+            if is_logical_flow:
+                confidence = min(0.90, 0.40 + (0.2 * keyword_strength) + (0.25 * temporal) + (0.2 * entity_val))
+                
+                # Minimum threshold for confirming an implicit deduction
+                if confidence > 0.45:
+                    to_event_match = search(r"EVENT:\s*(.+)", to_text)
+                    to_event = to_event_match.group(1).strip() if to_event_match else "Previous linked event"
+                    
+                    # Replace PREDECESSOR and TRIGGER with inferred links & debug info!
+                    new_pred_text = f"PREDECESSOR: [INFERRED] {to_event}"
+                    new_trig_text = f"TRIGGER: [IMPLICIT LOGIC: temporal={temporal:.2f}, entity={entity_val:.2f}]"
+                    
+                    # Update Node metadata inline (persisted via db.commit at end of build_timeline)
+                    from_node.description = from_text.replace(
+                        f"PREDECESSOR: {predecessor}", new_pred_text
+                    ).replace(
+                        "TRIGGER: N/A", new_trig_text
+                    )
+                    
+                    return inferred_rel, round(confidence, 3)
 
-    confidence = (0.45 * keyword_strength) + (0.30 * temporal) + (0.25 * entity_val)
+    # 3. Fallback Filter (Drop basic keyword noise, heavily penalize random topical overlap)
+    confidence = (0.2 * keyword_strength) + (0.15 * temporal) + (0.15 * entity_val)
+    if confidence < 0.35:
+        confidence = 0.0 # prune weak connections that aren't causal
+        
     return relation_type, round(confidence, 3)
 
 
