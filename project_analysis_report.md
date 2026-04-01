@@ -10,7 +10,7 @@
 
 ## 1. Executive Summary
 
-DeepDive Intelligence is a **deterministic, rule-based** Python backend that ingests news articles via RSS feeds, cleans and clusters them, builds a chronological timeline with causal edges, performs rule-based impact analysis, and detects weak signals — all without any LLM or ML dependencies.
+DeepDive Intelligence is a **deterministic, rule-based Causal Intelligence Engine**. It ingests news articles via RSS feeds, cleans and clusters them, but instead of simply summarizing them, it runs a **multi-node explicit and implicit causal reasoning algorithm** (in `timeline/service.py`) to trace backward correlations (e.g. *A triggered B*, *C is a result of A*). It builds a chronological timeline with causal edges, performs rule-based impact analysis, and detects weak signals — all natively without any LLM dependencies.
 
 The codebase is well-structured with clear separation of concerns across **10 domain modules**, a clean FastAPI layer, and a robust SQLAlchemy model layer with proper relationships, cascading deletes, and indices. The project is in an **early-to-mid stage** — the core pipeline is functional end-to-end but lacks production hardening, testing, logging granularity, and several enhancement opportunities.
 
