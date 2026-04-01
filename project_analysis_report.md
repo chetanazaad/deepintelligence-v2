@@ -446,19 +446,23 @@ erDiagram
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/health` | GET | Health check |
-| `/event` | GET | Search nodes by entity/event_type/description (ILIKE) |
-| `/timeline/{id}` | GET | Node timeline + incoming/outgoing edges |
-| `/impact/{id}` | GET | Impact analysis for a node |
-| `/signals/{id}` | GET | Detected signals for a node |
+| `/event` | GET | Search nodes using tokenized, multi-keyword relevance ranking (V2) |
+| `/timeline/{id}` | GET | Node timeline + structured incoming/outgoing edges |
+| `/impact/{id}` | GET | Structured impact analysis (winners/losers separated) |
+| `/signals/{id}` | GET | Structured detected signals |
 | `/pipeline/run` | POST | Trigger full pipeline execution |
+| `/pipeline/status` | GET | Poll pipeline execution status |
+| `/pipeline/validate`| GET | Verify data integrity |
 
-**Issues:**
-- ⚠️ **No authentication** — `/pipeline/run` is publicly accessible and could be abused
-- ⚠️ **No CORS middleware** — frontend cannot call this API cross-origin
-- ⚠️ `/pipeline/run` is **synchronous** — long RSS fetches + processing will timeout
-- ⚠️ No pagination on `/event` (hardcoded `limit=20`)
-- ⚠️ No Pydantic response models — responses are untyped `dict[str, object]`
-- ⚠️ `GET /event` uses `ILIKE` with user input — potential for slow queries on large datasets
+**Strengths (Upgraded):**
+- ✅ **Unified Response Envelopes** — Every read endpoint returns a normalized `{ event, timeline, impact, signals, metadata }` object.
+- ✅ **Advanced Search Ranking** — Tokenization, synonym expansion, synergy scoring, and entity priority rather than basic `ILIKE`.
+- ✅ **CORS Configured** — Works cleanly with the React frontend.
+
+**Remaining Issues:**
+- ⚠️ **No authentication** — `/pipeline/run` is publicly accessible.
+- ⚠️ `/pipeline/run` is **synchronous** — long RSS fetches + processing will timeout (though status polling works).
+- ⚠️ No Pydantic response models — responses are mostly untyped `dict[str, object]`.
 
 ---
 
@@ -466,23 +470,23 @@ erDiagram
 
 ### 🔴 Critical
 
-| # | Issue | Location | Impact |
-|---|---|---|---|
-| 1 | **No tests** | Project-wide | Zero regression safety; any change risks breaking the pipeline |
-| 2 | **No git initialized** | Root | No version history, no rollback capability |
-| 3 | **No authentication** | `api/` | Pipeline trigger and data endpoints are publicly accessible |
-| 4 | **Synchronous pipeline trigger** | `POST /pipeline/run` | Request will timeout on large feeds; blocks the API server |
-| 5 | **No database migrations** | `database/` | Schema changes require manual DDL or data loss via `drop_all` |
+| # | Issue | Location | Impact | Status |
+|---|---|---|---|---|
+| 1 | **No tests** | Project-wide | Zero regression safety | Unresolved |
+| 2 | **No git initialized** | Root | No rollback capability | ✅ Fixed |
+| 3 | **No authentication** | `api/` | Edpoints publicly accessible | Unresolved |
+| 4 | **Synchronous pipeline** | `POST /pipeline/run` | Request will timeout | Partial (status polled) |
+| 5 | **No database migrations** | `database/` | Schema changes require manual DDL | Unresolved |
 
 ### 🟡 Major
 
-| # | Issue | Location | Impact |
-|---|---|---|---|
-| 6 | O(n²) fuzzy dedup | `preprocessing/service.py` | Performance cliff at ~5K+ headlines |
-| 7 | Unpinned dependencies | `requirements.txt` | Builds are non-reproducible |
-| 8 | No CORS configuration | `api/main.py` | Frontend integration impossible |
-| 9 | All nodes re-processed every run | `impact/`, `signal_detection/` | Wasted computation, potential data overwrites |
-| 10 | Deprecated APIs used | `datetime.utcnow`, `@app.on_event` | Will break on future Python/FastAPI versions |
+| # | Issue | Location | Impact | Status |
+|---|---|---|---|---|
+| 6 | O(n²) fuzzy dedup | `preprocessing/` | Performance cliff at ~5K+ | Unresolved |
+| 7 | Unpinned dependencies | `requirements` | Non-reproducible builds | Unresolved |
+| 8 | No CORS configuration | `api/main.py` | Frontend integration impossible | ✅ Fixed |
+| 9 | All nodes re-processed | `impact/`, etc | Wasted computation | Unresolved |
+| 10 | Deprecated APIs used | Python/FastAPI | Will break on future versions | ✅ Fixed |
 
 ### 🟢 Minor
 

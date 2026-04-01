@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -346,70 +347,166 @@ def _build_unified_response(db: Session, node: Node) -> dict[str, object]:
 # Read endpoints — unified structured responses
 # ---------------------------------------------------------------------------
 
+_STOPWORDS = {
+    "the", "is", "in", "at", "to", "of", "and", "a", "an", "on", "for",
+    "with", "as", "by", "from", "that", "this", "it", "are", "was", "were",
+    "be", "has", "have", "had", "will", "would", "about"
+}
+
+_LOW_WEIGHT_WORDS = {"us", "help", "force", "want", "make", "say", "wants", "join", "open", "their", "they", "there"}
+
+_SYNONYMS = {
+    "uae": ["united", "arab", "emirates"],
+    "us": ["united", "states", "america", "usa"],
+    "uk": ["united", "kingdom", "britain"],
+    "hormuz": ["strait"],
+    "eu": ["european", "union"],
+    "un": ["united", "nations"],
+}
+
+def _tokenize_query(query: str) -> tuple[list[str], list[str]]:
+    words = re.sub(r'[^\w\s]', ' ', query.lower()).split()
+    base = []
+    synonyms = []
+    for w in words:
+        if w not in _STOPWORDS and len(w) > 1:
+            base.append(w)
+            if w in _SYNONYMS:
+                synonyms.extend(_SYNONYMS[w])
+    return list(set(base)), list(set(synonyms))
+
+
 @router.get("/event")
 def get_event(
     query: str = Query(..., min_length=2, description="Search term for entity, event, or topic"),
     limit: int = Query(10, ge=1, le=50, description="Maximum results to return"),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Search events with improved relevance ranking.
+    """Search events with improved relevance ranking for full sentences.
 
-    Searches across: entity, event_type, description, AND cluster main_topic.
-    Results ranked by: exact entity match > keyword match > recency.
+    Splits query into tokens, applies synonym mapping, and searches across:
+    entity, event_type, description, AND cluster main_topic.
+    Results ranked by: keyword matches > exact match > recency.
     """
     search_term = query.strip().lower()
-    pattern = f"%{search_term}%"
+    base_kws, syn_kws = _tokenize_query(search_term)
+    
+    # Fallback to the full term if tokenizer stripped everything
+    if not base_kws:
+        base_kws = [search_term]
+
+    # Construct SQLAlchemy OR conditions
+    conditions = []
+    for kw in base_kws:
+        pattern = f"%{kw}%"
+        conditions.append(Node.entity.ilike(pattern))
+        conditions.append(Node.event_type.ilike(pattern))
+        conditions.append(Node.description.ilike(pattern))
+        conditions.append(EventCluster.main_topic.ilike(pattern))
+        
+    # Synonyms apply ONLY to entity field
+    for kw in syn_kws:
+        pattern = f"%{kw}%"
+        conditions.append(Node.entity.ilike(pattern))
 
     # Broader search: join through cluster to catch topic matches
-    nodes = (
+    rows = (
         db.execute(
-            select(Node)
+            select(Node, EventCluster.main_topic)
             .outerjoin(EventCluster, EventCluster.id == Node.cluster_id)
-            .where(
-                or_(
-                    Node.entity.ilike(pattern),
-                    Node.event_type.ilike(pattern),
-                    Node.description.ilike(pattern),
-                    EventCluster.main_topic.ilike(pattern),
-                )
-            )
+            .where(or_(*conditions))
             .order_by(Node.timestamp.desc(), Node.id.desc())
-            .limit(limit * 2)  # fetch extra for re-ranking
+            .limit(limit * 10)  # fetch extra for re-ranking
         )
-        .scalars()
         .all()
     )
 
     # Relevance ranking
     scored: list[tuple[float, Node]] = []
-    for node in nodes:
+    for node, main_topic in rows:
         score = 0.0
         entity_lower = (node.entity or "").lower()
         desc_lower = (node.description or "").lower()
+        topic_lower = (main_topic or "").lower()
 
-        # Exact entity match is strongest signal
+        # 1. Exact full query match is strongest signal
         if entity_lower == search_term:
-            score += 10.0
+            score += 30.0
         elif search_term in entity_lower:
+            score += 15.0
+
+        if search_term in desc_lower:
+            score += 5.0
+            
+        if search_term in topic_lower:
             score += 5.0
 
-        # Description match
-        if search_term in desc_lower:
-            score += 2.0
+        # 2. Multi-keyword matching & entity priority logic
+        matched_kws = 0
+        strong_matches = 0
+        
+        all_kws = [(kw, False) for kw in base_kws] + [(kw, True) for kw in syn_kws]
+        
+        for kw, is_synonym in all_kws:
+            kw_matched = False
+            is_low_weight = kw in _LOW_WEIGHT_WORDS
+            
+            # Entity matching (Dominant)
+            if kw in entity_lower:
+                score += 0.5 if is_low_weight else 10.0
+                kw_matched = True
+                if not is_low_weight:
+                    strong_matches += 1
+            
+            # Topic & Desc matching (Synonyms do NOT apply here)
+            if not is_synonym:
+                if kw in topic_lower:
+                    score += 0.5 if is_low_weight else 5.0
+                    kw_matched = True
+                    if not is_low_weight:
+                        strong_matches += 1
+                        
+                if kw in desc_lower:
+                    score += 0.2 if is_low_weight else 2.0
+                    kw_matched = True
+                    
+            if kw_matched:
+                matched_kws += 1
+                
+        # 3. Keyword Synergy Bonus (reward entries that match multiple distinct words from the query)
+        if matched_kws > 1:
+            score += (matched_kws * 2.0)
+            
+        # Require at least some match to avoid generic noise 
+        if score == 0.0:
+            continue
+            
+        # Penalize if NO strong entity or topic matches occurred (avoids noise from low-weight generic words)
+        if strong_matches == 0:
+            score *= 0.1
 
-        # Recency bonus
+        # 4. Recency bonus
         if node.timestamp:
             age_days = (datetime.now(timezone.utc) - ensure_utc(node.timestamp)).total_seconds() / 86400.0
             score += max(0.0, 3.0 - (age_days / 10.0))
 
-        # Anchor bonus
+        # 5. Anchor bonus
         if node.is_anchor:
             score += 1.0
 
         scored.append((score, node))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    top_nodes = [node for _, node in scored[:limit]]
+    
+        # Take the best unique nodes (since multiple cluster topic rows might theoretically duplicate nodes)
+    top_nodes = []
+    seen = set()
+    for _, node in scored:
+        if node.id not in seen:
+            seen.add(node.id)
+            top_nodes.append(node)
+            if len(top_nodes) >= limit:
+                break
 
     results = [_build_unified_response(db, node) for node in top_nodes]
 
