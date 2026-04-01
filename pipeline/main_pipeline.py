@@ -3,6 +3,10 @@ import os
 from collections.abc import Callable
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from clustering.service import cluster_cleaned_news
 from database.session import SessionLocal, create_tables
 from expansion.service import expand_from_timeline

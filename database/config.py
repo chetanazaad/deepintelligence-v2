@@ -11,11 +11,15 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
 
-    db_host: str = Field(alias="DB_HOST")
+    # Direct DATABASE_URL (takes priority if set)
+    database_url: str = Field(default="", alias="DATABASE_URL")
+
+    # PostgreSQL components (used only if DATABASE_URL is empty)
+    db_host: str = Field(default="localhost", alias="DB_HOST")
     db_port: int = Field(default=5432, alias="DB_PORT")
-    db_name: str = Field(alias="DB_NAME")
-    db_user: str = Field(alias="DB_USER")
-    db_password: str = Field(alias="DB_PASSWORD")
+    db_name: str = Field(default="news_intelligence", alias="DB_NAME")
+    db_user: str = Field(default="postgres", alias="DB_USER")
+    db_password: str = Field(default="postgres", alias="DB_PASSWORD")
     db_sslmode: str = Field(default="prefer", alias="DB_SSLMODE")
 
     api_key: str = Field(default="", alias="API_KEY")
@@ -29,6 +33,8 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_database_uri(self) -> str:
+        if self.database_url:
+            return self.database_url
         return (
             f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
@@ -39,3 +45,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+

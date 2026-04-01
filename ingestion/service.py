@@ -43,6 +43,7 @@ def insert_raw_news(db: Session, items: list[dict[str, object]]) -> tuple[int, i
     """
     inserted = 0
     skipped = 0
+    seen_in_batch: set[str] = set()
 
     for item in items:
         title = str(item.get("title", "")).strip()
@@ -59,6 +60,13 @@ def insert_raw_news(db: Session, items: list[dict[str, object]]) -> tuple[int, i
 
         unique_id = generate_unique_id(title=title, source=source, published_at=published_at)
 
+        # Skip duplicates within the same batch
+        if unique_id in seen_in_batch:
+            skipped += 1
+            continue
+        seen_in_batch.add(unique_id)
+
+        # Skip duplicates already in DB
         exists = db.scalar(select(RawNews.id).where(RawNews.unique_id == unique_id))
         if exists is not None:
             skipped += 1

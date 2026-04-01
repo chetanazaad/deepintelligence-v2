@@ -20,6 +20,7 @@ from models.news_intelligence import (
 )
 from pipeline.main_pipeline import run_full_pipeline
 from pipeline.validation import run_validation
+from utils.datetime_helpers import ensure_utc
 
 logger = logging.getLogger(__name__)
 
@@ -398,7 +399,7 @@ def get_event(
 
         # Recency bonus
         if node.timestamp:
-            age_days = (datetime.now(timezone.utc) - node.timestamp).total_seconds() / 86400.0
+            age_days = (datetime.now(timezone.utc) - ensure_utc(node.timestamp)).total_seconds() / 86400.0
             score += max(0.0, 3.0 - (age_days / 10.0))
 
         # Anchor bonus

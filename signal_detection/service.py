@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from models.news_intelligence import CleanedNews, ClusterNewsMap, Node, RawNews, Signal
 
+from utils.datetime_helpers import ensure_utc
+
 
 # ---------------------------------------------------------------------------
 # Detection vocabulary — 3 categories with base strength weights
@@ -128,12 +130,12 @@ def _time_persistence_score(
     if first_seen is None or last_seen is None:
         return 0.15
 
-    span_days = max((last_seen - first_seen).total_seconds() / 86400.0, 0.0)
+    span_days = max((ensure_utc(last_seen) - ensure_utc(first_seen)).total_seconds() / 86400.0, 0.0)
     persistence = min(span_days / 7.0, 1.0)
 
     # Decay for stale signals
     now = datetime.now(timezone.utc)
-    age_days = max((now - last_seen).total_seconds() / 86400.0, 0.0)
+    age_days = max((now - ensure_utc(last_seen)).total_seconds() / 86400.0, 0.0)
     decay = max(0.0, 1.0 - (age_days / 30.0))
 
     return round(persistence * decay, 3)

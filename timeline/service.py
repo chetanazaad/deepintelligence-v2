@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from re import findall
 
+from utils.datetime_helpers import ensure_utc
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -157,7 +159,7 @@ def _temporal_signal(from_ts: datetime | None, to_ts: datetime | None) -> float:
     if from_ts is None or to_ts is None:
         return 0.15  # unknown — small default
 
-    gap_days = abs((from_ts - to_ts).total_seconds()) / 86400.0
+    gap_days = abs((ensure_utc(from_ts) - ensure_utc(to_ts)).total_seconds()) / 86400.0
     return max(0.0, 1.0 - (gap_days / 30.0))
 
 
@@ -345,7 +347,7 @@ def build_timeline(db: Session, max_clusters: int = 200) -> dict[str, int | str]
     for row in stats_rows[:max_clusters]:
         latest = row.latest_ts
         if isinstance(latest, datetime):
-            age_days = max((now - latest).total_seconds() / 86400.0, 0.0)
+            age_days = max((now - ensure_utc(latest)).total_seconds() / 86400.0, 0.0)
         else:
             age_days = 365.0
 
