@@ -151,6 +151,12 @@ def _build_event_payload(node: Node) -> dict[str, object]:
         "timestamp": _iso(node.timestamp),
         "is_anchor": node.is_anchor,
         "confidence_score": node.confidence_score,
+        # Recursive expansion metadata
+        "expansion_depth": node.expansion_depth,
+        "parent_node_id": node.parent_node_id,
+        "research_status": node.research_status,
+        "expansion_status": node.expansion_status,
+        "importance_score": node.importance_score,
     }
 
 

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import health_router, intelligence_router
+from api.routers import expansion_router, goals_router, health_router, intelligence_router, research_router
 from database.config import get_settings
 from database.session import create_tables
 
@@ -27,4 +27,6 @@ def on_startup() -> None:
 
 app.include_router(health_router)
 app.include_router(intelligence_router)
-
+app.include_router(expansion_router)
+app.include_router(research_router)
+app.include_router(goals_router)

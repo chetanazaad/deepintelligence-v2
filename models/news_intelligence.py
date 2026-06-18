@@ -105,6 +105,12 @@ class Node(Base):
         Index("ix_nodes_entity", "entity"),
         Index("ix_nodes_timestamp", "timestamp"),
         Index("ix_nodes_created_at", "created_at"),
+        # Recursive expansion indexes
+        Index("ix_nodes_parent_node_id", "parent_node_id"),
+        Index("ix_nodes_expansion_depth", "expansion_depth"),
+        Index("ix_nodes_research_status", "research_status"),
+        Index("ix_nodes_expansion_status", "expansion_status"),
+        Index("ix_nodes_importance_score", "importance_score"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -119,6 +125,24 @@ class Node(Base):
     is_anchor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+    # --- Recursive expansion fields ---
+    expansion_depth: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    parent_node_id: Mapped[int | None] = mapped_column(
+        ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True,
+    )
+    research_status: Mapped[str] = mapped_column(
+        String(50), default="not_started", nullable=False, server_default="not_started",
+    )
+    expansion_status: Mapped[str] = mapped_column(
+        String(50), default="not_started", nullable=False, server_default="not_started",
+    )
+    importance_score: Mapped[float] = mapped_column(
+        Float, default=0.5, nullable=False, server_default="0.5",
+    )
+    research_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expanded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # --- Relationships ---
     cluster: Mapped["EventCluster"] = relationship(back_populates="nodes")
     outgoing_edges: Mapped[list["Edge"]] = relationship(
         back_populates="from_node",
@@ -136,6 +160,23 @@ class Node(Base):
     )
     impacts: Mapped[list["Impact"]] = relationship(back_populates="node", cascade="all, delete-orphan")
     signals: Mapped[list["Signal"]] = relationship(back_populates="node", cascade="all, delete-orphan")
+    research_logs: Mapped[list["NodeResearchLog"]] = relationship(
+        back_populates="node", cascade="all, delete-orphan",
+    )
+    research_profile: Mapped["NodeResearchProfile | None"] = relationship(
+        back_populates="node", cascade="all, delete-orphan", uselist=False,
+    )
+
+    # Self-referential parent/children for expansion tree
+    parent: Mapped["Node | None"] = relationship(
+        back_populates="children",
+        remote_side="Node.id",
+        foreign_keys=[parent_node_id],
+    )
+    children: Mapped[list["Node"]] = relationship(
+        back_populates="parent",
+        foreign_keys=[parent_node_id],
+    )
 
 
 class Edge(Base):
@@ -215,3 +256,129 @@ class Signal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     node: Mapped["Node"] = relationship(back_populates="signals")
+
+
+class NodeResearchLog(Base):
+    """Audit trail for every research attempt on a node.
+
+    A node can be researched multiple times (re-research after new data
+    ingestion, recovery from failure, different parameters). This table
+    stores the full history.
+    """
+
+    __tablename__ = "node_research_log"
+    __table_args__ = (
+        Index("ix_research_log_node_id", "node_id"),
+        Index("ix_research_log_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False)
+    research_depth: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    candidates_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    candidates_qualified: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    best_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gate_results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="completed", nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    node: Mapped["Node"] = relationship(back_populates="research_logs")
+
+
+class NodeResearchProfile(Base):
+    """1:1 profile storing the heavy JSON intelligence for a Node.
+    
+    Contains the research version and the comprehensive JSON blob
+    of summary, causal chain, impact profile, signal warnings, and
+    investigation leads.
+    """
+
+    __tablename__ = "node_research_profile"
+    __table_args__ = (
+        Index("ix_node_research_profile_node_id", "node_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), unique=True, nullable=False)
+    research_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    research_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    node: Mapped["Node"] = relationship(back_populates="research_profile")
+
+
+class LeadQueue(Base):
+    """The central nervous system of the expansion loop.
+    
+    Tracks investigation leads generated by the Node Research Engine,
+    manages their context-aware scoring, and dictates what the
+    Recursive Expansion Engine investigates next.
+    """
+
+    __tablename__ = "lead_queue"
+    __table_args__ = (
+        Index("ix_lead_queue_source_node_id", "source_node_id"),
+        Index("ix_lead_queue_status", "status"),
+        Index("ix_lead_queue_entity", "entity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source_node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False)
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("investigation_goals.id", ondelete="SET NULL"), nullable=True)
+    entity: Mapped[str] = mapped_column(String(255), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    score_profile: Mapped[dict] = mapped_column(JSON, nullable=False)
+    base_score: Mapped[float] = mapped_column(Float, nullable=False)
+    dynamic_score: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    source_node: Mapped["Node"] = relationship("Node", foreign_keys=[source_node_id])
+    goal: Mapped["InvestigationGoal | None"] = relationship("InvestigationGoal", foreign_keys=[goal_id])
+
+
+class InvestigationGoal(Base):
+    """The purpose layer of the intelligence system.
+    
+    Gives the expansion loop a reason to investigate. Every expansion
+    decision is evaluated against the active goal's question and keywords.
+    Supports hierarchical sub-goals via parent_goal_id.
+    """
+
+    __tablename__ = "investigation_goals"
+    __table_args__ = (
+        Index("ix_investigation_goals_status", "status"),
+        Index("ix_investigation_goals_origin_node_id", "origin_node_id"),
+        Index("ix_investigation_goals_parent_goal_id", "parent_goal_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    parent_goal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("investigation_goals.id", ondelete="CASCADE"), nullable=True,
+    )
+    origin_node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False)
+    goal_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    goal_question: Mapped[str] = mapped_column(Text, nullable=False)
+    keywords: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    completion_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    expansion_budget: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    expansions_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    stall_counter: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    origin_node: Mapped["Node"] = relationship("Node", foreign_keys=[origin_node_id])
+    parent_goal: Mapped["InvestigationGoal | None"] = relationship(
+        "InvestigationGoal", remote_side="InvestigationGoal.id", foreign_keys=[parent_goal_id],
+    )

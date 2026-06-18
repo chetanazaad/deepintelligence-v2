@@ -26,6 +26,7 @@ from models.news_intelligence import (
     EventCluster,
     Impact,
     Node,
+    NodeResearchLog,
     RawNews,
     Signal,
     TimelineEntry,
@@ -428,6 +429,94 @@ def _check_orphans(db: Session) -> list[dict[str, object]]:
     return issues
 
 
+def _check_expansion_integrity(db: Session) -> list[dict[str, object]]:
+    """Validate recursive expansion fields on nodes."""
+    issues: list[dict[str, object]] = []
+
+    # parent_node_id must point to an existing node (or be NULL)
+    dangling_parents = db.scalar(
+        select(func.count(Node.id))
+        .outerjoin(
+            Node.__table__.alias("parent"),
+            Node.parent_node_id == text("parent.id"),
+        )
+        .where(
+            Node.parent_node_id.isnot(None),
+        )
+    )
+    # Use a simpler check: count nodes whose parent_node_id doesn't exist
+    if dangling_parents is not None:
+        bad_parents = db.scalar(
+            select(func.count(Node.id)).where(
+                Node.parent_node_id.isnot(None),
+                ~Node.parent_node_id.in_(select(Node.id)),
+            )
+        ) or 0
+        if bad_parents > 0:
+            issues.append({
+                "check": "expansion_dangling_parent",
+                "severity": "error",
+                "detail": f"{bad_parents} nodes have parent_node_id pointing to non-existent nodes",
+            })
+
+    # research_status must be a valid value
+    valid_research = {"not_started", "pending", "in_progress", "completed", "failed", "skipped"}
+    invalid_research = db.scalar(
+        select(func.count(Node.id)).where(
+            ~Node.research_status.in_(valid_research)
+        )
+    ) or 0
+    if invalid_research > 0:
+        issues.append({
+            "check": "expansion_invalid_research_status",
+            "severity": "error",
+            "detail": f"{invalid_research} nodes have invalid research_status values",
+        })
+
+    # expansion_status must be a valid value
+    valid_expansion = {"not_started", "pending", "in_progress", "completed", "failed", "terminal"}
+    invalid_expansion = db.scalar(
+        select(func.count(Node.id)).where(
+            ~Node.expansion_status.in_(valid_expansion)
+        )
+    ) or 0
+    if invalid_expansion > 0:
+        issues.append({
+            "check": "expansion_invalid_expansion_status",
+            "severity": "error",
+            "detail": f"{invalid_expansion} nodes have invalid expansion_status values",
+        })
+
+    # importance_score must be in [0.0, 1.0]
+    bad_importance = db.scalar(
+        select(func.count(Node.id)).where(
+            (Node.importance_score < 0.0) | (Node.importance_score > 1.0)
+        )
+    ) or 0
+    if bad_importance > 0:
+        issues.append({
+            "check": "expansion_importance_out_of_range",
+            "severity": "warning",
+            "detail": f"{bad_importance} nodes have importance_score outside [0.0, 1.0]",
+        })
+
+    # expansion_depth must be non-negative
+    bad_depth = db.scalar(
+        select(func.count(Node.id)).where(Node.expansion_depth < 0)
+    ) or 0
+    if bad_depth > 0:
+        issues.append({
+            "check": "expansion_negative_depth",
+            "severity": "error",
+            "detail": f"{bad_depth} nodes have negative expansion_depth",
+        })
+
+    if not issues:
+        logger.info("Expansion integrity: OK")
+
+    return issues
+
+
 # ---------------------------------------------------------------------------
 # Pipeline statistics (informational)
 # ---------------------------------------------------------------------------
@@ -444,6 +533,7 @@ def _collect_stats(db: Session) -> dict[str, int]:
         "timeline_entries": db.scalar(select(func.count(TimelineEntry.id))) or 0,
         "impacts": db.scalar(select(func.count(Impact.id))) or 0,
         "signals": db.scalar(select(func.count(Signal.id))) or 0,
+        "node_research_log": db.scalar(select(func.count(NodeResearchLog.id))) or 0,
     }
 
 
@@ -476,6 +566,7 @@ def run_validation(db: Session) -> dict[str, object]:
     all_issues.extend(_check_relationships(db))
     all_issues.extend(_check_output_consistency(db))
     all_issues.extend(_check_orphans(db))
+    all_issues.extend(_check_expansion_integrity(db))
 
     # Severity summary
     severity_counts = {"error": 0, "warning": 0, "info": 0}
@@ -506,7 +597,7 @@ def run_validation(db: Session) -> dict[str, object]:
     return {
         "health": health,
         "stats": stats,
-        "checks_run": 6,
+        "checks_run": 7,
         "issues_total": len(all_issues),
         "issues_by_severity": severity_counts,
         "issues": all_issues,
