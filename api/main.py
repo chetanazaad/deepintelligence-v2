@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import expansion_router, goals_router, health_router, intelligence_router, research_router
+from api.routers import expansion_router, goals_router, health_router, intelligence_router, research_router, evaluation_router, assessment_router
 from database.config import get_settings
 from database.session import create_tables
 
@@ -30,3 +30,5 @@ app.include_router(intelligence_router)
 app.include_router(expansion_router)
 app.include_router(research_router)
 app.include_router(goals_router)
+app.include_router(evaluation_router)
+app.include_router(assessment_router)

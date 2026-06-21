@@ -382,3 +382,216 @@ class InvestigationGoal(Base):
     parent_goal: Mapped["InvestigationGoal | None"] = relationship(
         "InvestigationGoal", remote_side="InvestigationGoal.id", foreign_keys=[parent_goal_id],
     )
+
+
+class EvaluationSnapshot(Base):
+    """Point-in-time snapshot of all system evaluation metrics.
+
+    Created after pipeline runs, expansion cycles, manual triggers,
+    or benchmark executions. Used for longitudinal learning analysis
+    and system health dashboards.
+    """
+
+    __tablename__ = "evaluation_snapshots"
+    __table_args__ = (
+        Index("ix_evaluation_snapshots_snapshot_type", "snapshot_type"),
+        Index("ix_evaluation_snapshots_system_version", "system_version"),
+        Index("ix_evaluation_snapshots_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    snapshot_type: Mapped[str] = mapped_column(String(50), nullable=False)  # pipeline_run | expansion_cycle | manual | benchmark
+    system_version: Mapped[str] = mapped_column(String(50), default="v1.0", nullable=False)
+    benchmark_scenario_id: Mapped[int | None] = mapped_column(
+        ForeignKey("benchmark_scenarios.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    # Graph totals
+    total_nodes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_edges: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_goals: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_leads_processed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Goal success metrics (Part 1)
+    goal_success_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_goal_completion: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_goal_coverage: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_goal_efficiency: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_goal_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Expansion quality (Part 2)
+    expansion_success_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    useful_node_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    rejected_lead_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    merge_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    enhancement_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_lead_contribution: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_novelty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Knowledge quality (Part 3)
+    knowledge_density: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    knowledge_growth: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    evidence_density: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    connection_density: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    research_density: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    compression_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Explanatory power (Part 4)
+    explanation_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Knowledge reuse (Part 5)
+    reuse_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    link_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    duplicate_prevention_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Investigation efficiency (Part 6)
+    avg_nodes_per_goal: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_expansions_per_goal: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    budget_efficiency: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    # Longitudinal (Part 7)
+    graph_growth_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    knowledge_growth_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    avg_loop_risk: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class GoalEvaluation(Base):
+    """Per-goal evaluation record.
+
+    Created when a goal reaches a terminal state (completed, abandoned)
+    or on-demand via the evaluation API.
+    """
+
+    __tablename__ = "goal_evaluations"
+    __table_args__ = (
+        Index("ix_goal_evaluations_goal_id", "goal_id"),
+        Index("ix_goal_evaluations_snapshot_id", "snapshot_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("investigation_goals.id", ondelete="CASCADE"), nullable=False)
+    snapshot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("evaluation_snapshots.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    completion_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    coverage_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    efficiency_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    satisfaction_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    explanation_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    nodes_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    nodes_enhanced: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    nodes_linked: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    leads_rejected: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    leads_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expansions_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expansion_budget: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    knowledge_categories_required: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    knowledge_categories_covered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    causal_chain_depth: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    evaluation_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    goal: Mapped["InvestigationGoal"] = relationship("InvestigationGoal", foreign_keys=[goal_id])
+
+
+class BenchmarkScenario(Base):
+    """Reusable investigation scenario for version-to-version comparison."""
+
+    __tablename__ = "benchmark_scenarios"
+    __table_args__ = (
+        Index("ix_benchmark_scenarios_name", "name", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    goal_question: Mapped[str] = mapped_column(Text, nullable=False)
+    goal_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    seed_entities: Mapped[list] = mapped_column(JSON, nullable=False)
+    expected_categories: Mapped[list] = mapped_column(JSON, nullable=False)
+    expected_min_completion: Mapped[float] = mapped_column(Float, default=0.50, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class BenchmarkResult(Base):
+    """Links a benchmark scenario execution to its evaluation snapshot."""
+
+    __tablename__ = "benchmark_results"
+    __table_args__ = (
+        Index("ix_benchmark_results_scenario_id", "scenario_id"),
+        Index("ix_benchmark_results_system_version", "system_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("benchmark_scenarios.id", ondelete="CASCADE"), nullable=False)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("evaluation_snapshots.id", ondelete="CASCADE"), nullable=False)
+    system_version: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    completion_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    coverage_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    efficiency_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    explanation_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    knowledge_density: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    passed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    comparison_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class IntelligenceAssessment(Base):
+    """Represents a structured intelligence report synthesized for an InvestigationGoal."""
+
+    __tablename__ = "intelligence_assessments"
+    __table_args__ = (
+        Index("ix_intelligence_assessments_goal_id", "goal_id"),
+        Index("ix_intelligence_assessments_status", "status"),
+        Index("ix_intelligence_assessments_version", "version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("investigation_goals.id", ondelete="CASCADE"), nullable=False)
+
+    assessment_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    confidence_level: Mapped[str] = mapped_column(String(20), nullable=False, default="LOW")
+
+    assessment_text: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+    knowledge_gaps: Mapped[dict] = mapped_column(JSON, nullable=False)
+    alternative_explanations: Mapped[dict] = mapped_column(JSON, nullable=False)
+    future_scenarios: Mapped[dict] = mapped_column(JSON, nullable=False)
+    executive_summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
+
+    goal: Mapped["InvestigationGoal"] = relationship("InvestigationGoal", foreign_keys=[goal_id])
+
+
+class AssessmentQualityMetric(Base):
+    """Tracks quality and accuracy metrics of generated assessments over time."""
+
+    __tablename__ = "assessment_quality_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("intelligence_assessments.id", ondelete="CASCADE"), nullable=False)
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("evaluation_snapshots.id", ondelete="SET NULL"), nullable=True)
+
+    evidence_strength: Mapped[float] = mapped_column(Float, nullable=False)
+    causal_consistency: Mapped[float] = mapped_column(Float, nullable=False)
+    completeness: Mapped[float] = mapped_column(Float, nullable=False)
+    stability_score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    assessment: Mapped["IntelligenceAssessment"] = relationship("IntelligenceAssessment", foreign_keys=[assessment_id])

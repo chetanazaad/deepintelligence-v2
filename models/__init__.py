@@ -1,9 +1,13 @@
 from models.article import Article
 from models.news_intelligence import (
+    BenchmarkResult,
+    BenchmarkScenario,
     CleanedNews,
     ClusterNewsMap,
     Edge,
+    EvaluationSnapshot,
     EventCluster,
+    GoalEvaluation,
     Impact,
     InvestigationGoal,
     LeadQueue,
@@ -13,6 +17,8 @@ from models.news_intelligence import (
     RawNews,
     Signal,
     TimelineEntry,
+    IntelligenceAssessment,
+    AssessmentQualityMetric,
 )
 
 __all__ = [
@@ -30,4 +36,11 @@ __all__ = [
     "NodeResearchProfile",
     "LeadQueue",
     "InvestigationGoal",
+    "EvaluationSnapshot",
+    "GoalEvaluation",
+    "BenchmarkScenario",
+    "BenchmarkResult",
+    "IntelligenceAssessment",
+    "AssessmentQualityMetric",
 ]
+

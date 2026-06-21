@@ -177,6 +177,13 @@ def run_expansion_cycle(db: Session) -> dict:
             "budget": f"{goal.expansions_used}/{goal.expansion_budget}",
         }
         
+    # Create evaluation snapshot for this cycle
+    try:
+        from evaluation.dashboard import create_snapshot
+        create_snapshot(db, snapshot_type="expansion_cycle", system_version="v1.0")
+    except Exception as e:
+        logger.error("Failed to create evaluation snapshot: %s", e)
+
     return {
         "status": "success",
         "metrics": metrics,

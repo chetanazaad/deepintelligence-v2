@@ -355,6 +355,16 @@ def check_goal_state(db: Session, goal: InvestigationGoal) -> str:
         goal.completed_at = datetime.now(timezone.utc)
         db.commit()
         logger.info("Goal %d COMPLETED (score=%.2f)", goal.id, new_score)
+        try:
+            from evaluation.metrics import evaluate_goal
+            evaluate_goal(db, goal)
+        except Exception as e:
+            logger.error("Failed to evaluate goal %d on completion: %s", goal.id, e)
+        try:
+            from expansion.assessment import create_or_update_assessment
+            create_or_update_assessment(db, goal.id, status="final")
+        except Exception as e:
+            logger.error("Failed to generate assessment for goal %d on completion: %s", goal.id, e)
         return "COMPLETED"
 
     # ABANDONED (budget exhausted)
@@ -362,6 +372,16 @@ def check_goal_state(db: Session, goal: InvestigationGoal) -> str:
         goal.status = "abandoned"
         db.commit()
         logger.info("Goal %d ABANDONED (budget exhausted: %d/%d)", goal.id, goal.expansions_used, goal.expansion_budget)
+        try:
+            from evaluation.metrics import evaluate_goal
+            evaluate_goal(db, goal)
+        except Exception as e:
+            logger.error("Failed to evaluate goal %d on abandonment: %s", goal.id, e)
+        try:
+            from expansion.assessment import create_or_update_assessment
+            create_or_update_assessment(db, goal.id, status="final")
+        except Exception as e:
+            logger.error("Failed to generate assessment for goal %d on abandonment: %s", goal.id, e)
         return "ABANDONED"
 
     # STALL detection
