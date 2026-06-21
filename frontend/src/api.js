@@ -78,3 +78,36 @@ export async function getLeadQueue(status = null) {
   const res = await api.get(url);
   return res.data;
 }
+
+// --- Goals & Intelligence Assessments API ---
+
+export async function listGoals(status = null) {
+  const res = await api.get('/goals', { params: { status } });
+  return res.data;
+}
+
+export async function getGoalDetails(goalId) {
+  const res = await api.get(`/goals/${goalId}`);
+  return res.data;
+}
+
+export async function generateGoalAssessment(goalId) {
+  const res = await api.post(`/goals/${goalId}/assessments`);
+  return res.data;
+}
+
+export async function getLatestAssessment(goalId) {
+  const res = await api.get(`/goals/${goalId}/assessments/latest`);
+  return res.data;
+}
+
+export async function publishAssessment(assessmentId) {
+  const res = await api.post(`/assessments/${assessmentId}/publish`);
+  return res.data;
+}
+
+export async function getEvaluationStatus() {
+  const res = await api.get('/pipeline/validate');
+  return res.data;
+}
+
