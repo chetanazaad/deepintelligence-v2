@@ -19,8 +19,12 @@ import ResearchPanel from './components/ResearchPanel';
 import AlternativeExplanations from './components/AlternativeExplanations';
 import EvaluationPanel from './components/EvaluationPanel';
 import GraphPanel from './components/GraphPanel';
+import ValidationDashboard from './components/ValidationDashboard';
 
 export default function App() {
+  // Navigation & Workspace Toggles
+  const [currentView, setCurrentView] = useState('intelligence'); // 'intelligence' | 'validation'
+  
   // Navigation & Search
   const [results, setResults] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -118,8 +122,24 @@ export default function App() {
               <p className="text-xs text-text-muted">Intelligence Analysis Platform</p>
             </div>
           </div>
-          <div className="w-96">
-            <SearchBar onSearch={handleSearch} loading={loading} />
+          <div className="flex items-center gap-4">
+            <nav className="flex gap-1 p-1 bg-surface-alt rounded-lg border border-border">
+              <button
+                onClick={() => setCurrentView('intelligence')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded transition-all cursor-pointer ${currentView === 'intelligence' ? 'bg-surface-card text-accent' : 'text-text-muted hover:text-text-secondary'}`}
+              >
+                💼 WORKSPACE
+              </button>
+              <button
+                onClick={() => setCurrentView('validation')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded transition-all cursor-pointer ${currentView === 'validation' ? 'bg-surface-card text-accent' : 'text-text-muted hover:text-text-secondary'}`}
+              >
+                🛡️ VALIDATION
+              </button>
+            </nav>
+            <div className="w-80">
+              <SearchBar onSearch={handleSearch} loading={loading} />
+            </div>
           </div>
         </div>
       </header>
@@ -134,8 +154,10 @@ export default function App() {
           </div>
         )}
 
-        {/* Core Layout Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {currentView === 'validation' ? (
+          <ValidationDashboard />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* LEFT COLUMN: Events & Goals */}
           <div className="lg:col-span-1 space-y-6">
             {results.length > 0 && (
@@ -189,7 +211,8 @@ export default function App() {
             <ResearchPanel leads={leads} />
           </div>
         </div>
-      </main>
+      )}
+    </main>
 
       {/* Developer Health Panel */}
       <EvaluationPanel statusData={systemHealth} />

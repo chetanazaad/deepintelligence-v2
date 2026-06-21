@@ -19,6 +19,10 @@ from models.news_intelligence import (
     TimelineEntry,
     IntelligenceAssessment,
     AssessmentQualityMetric,
+    HumanFeedback,
+    ValidationSnapshot,
+    FailureReport,
+    SystemReadiness,
 )
 
 __all__ = [
@@ -42,5 +46,9 @@ __all__ = [
     "BenchmarkResult",
     "IntelligenceAssessment",
     "AssessmentQualityMetric",
+    "HumanFeedback",
+    "ValidationSnapshot",
+    "FailureReport",
+    "SystemReadiness",
 ]
 

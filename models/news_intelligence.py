@@ -595,3 +595,74 @@ class AssessmentQualityMetric(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     assessment: Mapped["IntelligenceAssessment"] = relationship("IntelligenceAssessment", foreign_keys=[assessment_id])
+
+
+class HumanFeedback(Base):
+    __tablename__ = "human_feedbacks"
+    __table_args__ = (
+        Index("ix_human_feedbacks_assessment_id", "assessment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("intelligence_assessments.id", ondelete="CASCADE"), nullable=False)
+    analyst_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    usefulness_score: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+    correctness_score: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+    explanation_score: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+    analyst_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    assessment: Mapped["IntelligenceAssessment"] = relationship("IntelligenceAssessment")
+
+
+class ValidationSnapshot(Base):
+    __tablename__ = "validation_snapshots"
+    __table_args__ = (
+        Index("ix_validation_snapshots_goal_id", "goal_id"),
+        Index("ix_validation_snapshots_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("investigation_goals.id", ondelete="CASCADE"), nullable=False)
+    entity_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    goal_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    scenario_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    explanation_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    assessment_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    goal: Mapped["InvestigationGoal"] = relationship("InvestigationGoal")
+
+
+class FailureReport(Base):
+    __tablename__ = "failure_reports"
+    __table_args__ = (
+        Index("ix_failure_reports_assessment_id", "assessment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("intelligence_assessments.id", ondelete="CASCADE"), nullable=False)
+    failures: Mapped[list] = mapped_column(JSON, nullable=False)  # list of strings/error codes
+    severity: Mapped[str] = mapped_column(String(50), nullable=False)  # LOW|MEDIUM|HIGH
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    assessment: Mapped["IntelligenceAssessment"] = relationship("IntelligenceAssessment")
+
+
+class SystemReadiness(Base):
+    __tablename__ = "system_readiness"
+    __table_args__ = (
+        Index("ix_system_readiness_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    entity_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    assessment_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    explanation_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    scenario_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    goal_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    overall_score: Mapped[float] = mapped_column(Float, nullable=False)  # 0 to 100
+    classification: Mapped[str] = mapped_column(String(50), nullable=False)  # EXPERIMENTAL|LEARNING|STABLE|PRODUCTION_READY
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+

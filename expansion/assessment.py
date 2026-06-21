@@ -20,7 +20,14 @@ from models.news_intelligence import (
     Signal,
     IntelligenceAssessment,
     AssessmentQualityMetric,
+    FailureReport,
 )
+from evaluation.entity_quality import evaluate_entity
+from evaluation.goal_quality import evaluate_goal
+from evaluation.scenario_quality import evaluate_scenario
+from evaluation.explanation_quality import evaluate_explanation
+from evaluation.failures import run_failure_analysis
+
 from expansion.goals import (
     _find_goal_related_nodes,
     get_goal_knowledge_coverage,
@@ -349,6 +356,7 @@ def create_or_update_assessment(db: Session, goal_id: int, status: str = "draft"
         
         # Track quality
         _track_quality_metric(db, existing, evidence_strength, related_ids)
+        _run_validation_and_failures(db, existing, goal, related_ids, evidence_strength)
         return existing
     else:
         # Create a new version
@@ -380,7 +388,55 @@ def create_or_update_assessment(db: Session, goal_id: int, status: str = "draft"
         db.commit()
 
         _track_quality_metric(db, new_assessment, evidence_strength, related_ids)
+        _run_validation_and_failures(db, new_assessment, goal, related_ids, evidence_strength)
         return new_assessment
+
+
+def _run_validation_and_failures(
+    db: Session,
+    assessment: IntelligenceAssessment,
+    goal: InvestigationGoal,
+    related_ids: list[int],
+    evidence_strength: float
+) -> None:
+    """Run validation checks and save FailureReport for this assessment."""
+    try:
+        nodes = db.execute(select(Node).where(Node.id.in_(related_ids))).scalars().all() if related_ids else []
+        ent_results = [evaluate_entity(n.entity) for n in nodes]
+        g_score = evaluate_goal(goal.goal_question)
+        s_score = evaluate_scenario(assessment.future_scenarios, goal.goal_type)
+        
+        causal_depth = 3 # mock/average representation
+        gap_count = len(assessment.knowledge_gaps.get("critical", [])) if assessment.knowledge_gaps else 0
+        exp_res = evaluate_explanation(
+            causal_depth=causal_depth,
+            evidence_count=len(related_ids),
+            gap_count=gap_count,
+            entity_references=len(nodes),
+            category_coverage=0.8
+        )
+
+        fail_res = run_failure_analysis(
+            entity_results=ent_results,
+            goal_quality_score=g_score,
+            scenario_quality_score=s_score,
+            explanation_quality_score=exp_res["score"],
+            evidence_strength=evidence_strength,
+            scenarios=assessment.future_scenarios,
+            causal_depth=causal_depth
+        )
+
+        report = FailureReport(
+            assessment_id=assessment.id,
+            failures=fail_res["failures"],
+            severity=fail_res["severity"],
+            created_at=datetime.now(timezone.utc)
+        )
+        db.add(report)
+        db.commit()
+    except Exception as e:
+        logger.exception("Failed to run failure analysis validation checks: %s", str(e))
+
 
 
 def _track_quality_metric(
