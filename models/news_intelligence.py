@@ -666,3 +666,24 @@ class SystemReadiness(Base):
     classification: Mapped[str] = mapped_column(String(50), nullable=False)  # EXPERIMENTAL|LEARNING|STABLE|PRODUCTION_READY
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+
+class LLMAssessment(Base):
+    __tablename__ = "llm_assessments"
+    __table_args__ = (
+        Index("ix_llm_assessments_assessment_id", "assessment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("intelligence_assessments.id", ondelete="CASCADE"), nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    latency: Mapped[float] = mapped_column(Float, nullable=False)  # in seconds
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    evaluation_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    assessment: Mapped["IntelligenceAssessment"] = relationship("IntelligenceAssessment")
+
+

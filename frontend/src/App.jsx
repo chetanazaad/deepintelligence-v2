@@ -5,7 +5,8 @@ import {
   getGoalDetails,
   getLatestAssessment,
   getLeadQueue,
-  getEvaluationStatus
+  getEvaluationStatus,
+  getLlmAssessment
 } from './api';
 
 import SearchBar from './components/SearchBar';
@@ -37,6 +38,7 @@ export default function App() {
   const [selectedGoalId, setSelectedGoalId] = useState(null);
   const [goalDetails, setGoalDetails] = useState(null);
   const [assessment, setAssessment] = useState(null);
+  const [llmAssessment, setLlmAssessmentState] = useState(null);
   const [leads, setLeads] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
 
@@ -75,9 +77,18 @@ export default function App() {
         try {
           const ass = await getLatestAssessment(selectedGoalId);
           setAssessment(ass);
+          
+          // Try fetching LLM assessment
+          try {
+            const llm = await getLlmAssessment(selectedGoalId);
+            setLlmAssessmentState(llm);
+          } catch {
+            setLlmAssessmentState(null);
+          }
         } catch {
           // If no assessment exists yet, reset state
           setAssessment(null);
+          setLlmAssessmentState(null);
         }
       } catch (err) {
         console.error(`Failed to load data for goal ${selectedGoalId}:`, err);
@@ -187,6 +198,7 @@ export default function App() {
           <div className="lg:col-span-2 space-y-6">
             <IntelligenceAssessmentCard
               assessment={assessment}
+              llmAssessment={llmAssessment}
               goalQuestion={goalDetails?.goal_question || 'No Active Goal Selected'}
             />
 

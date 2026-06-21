@@ -111,3 +111,9 @@ export async function getEvaluationStatus() {
   return res.data;
 }
 
+export async function getLlmAssessment(goalId) {
+  const res = await api.get(`/goals/${goalId}/assessments/llm`);
+  return res.data;
+}
+
+

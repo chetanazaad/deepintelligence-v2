@@ -23,7 +23,9 @@ from models.news_intelligence import (
     ValidationSnapshot,
     FailureReport,
     SystemReadiness,
+    LLMAssessment,
 )
+
 
 __all__ = [
     "Article",
@@ -50,5 +52,6 @@ __all__ = [
     "ValidationSnapshot",
     "FailureReport",
     "SystemReadiness",
+    "LLMAssessment",
 ]
 

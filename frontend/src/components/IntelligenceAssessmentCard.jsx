@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-export default function IntelligenceAssessmentCard({ assessment, goalQuestion }) {
+export default function IntelligenceAssessmentCard({ assessment, llmAssessment, goalQuestion }) {
+  const [activeView, setActiveView] = useState('deterministic'); // 'deterministic' | 'llm'
+
   if (!assessment) {
     return (
       <div className="bg-surface-card border border-border rounded-xl p-6 text-center">
@@ -29,7 +31,8 @@ export default function IntelligenceAssessmentCard({ assessment, goalQuestion })
 
   return (
     <div className="bg-surface-card border border-border rounded-xl p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 border-b border-border pb-4">
         <div>
           <span className="text-[10px] font-bold text-accent tracking-widest uppercase">
             Intelligence Assessment v{version} ({status})
@@ -42,17 +45,68 @@ export default function IntelligenceAssessmentCard({ assessment, goalQuestion })
         </div>
       </div>
 
-      {executive_summary && (
-        <div className="p-4 bg-surface-alt rounded-lg border border-border">
-          <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">Executive Summary</h3>
-          <p className="text-sm text-text-secondary leading-relaxed">{executive_summary}</p>
+      {/* View Selector Toggle */}
+      <div className="flex gap-2 p-1 bg-surface-alt rounded-lg border border-border">
+        <button
+          onClick={() => setActiveView('deterministic')}
+          className={`flex-1 text-center py-1.5 text-xs font-bold rounded transition-all cursor-pointer
+            ${activeView === 'deterministic'
+              ? 'bg-surface-card text-accent'
+              : 'text-text-muted hover:text-text-secondary'
+            }`}
+        >
+          💼 DETERMINISTIC WORKSPACE
+        </button>
+        <button
+          onClick={() => setActiveView('llm')}
+          className={`flex-1 text-center py-1.5 text-xs font-bold rounded transition-all cursor-pointer
+            ${activeView === 'llm'
+              ? 'bg-surface-card text-accent'
+              : 'text-text-muted hover:text-text-secondary'
+            }`}
+        >
+          🤖 LLM AUGMENTATION LAYER
+        </button>
+      </div>
+
+      {/* Render selected view */}
+      {activeView === 'deterministic' ? (
+        <div className="space-y-6">
+          {executive_summary && (
+            <div className="p-4 bg-surface-alt rounded-lg border border-border">
+              <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">Executive Summary</h3>
+              <p className="text-sm text-text-secondary leading-relaxed">{executive_summary}</p>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">Detailed Analysis</h3>
+            <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">{assessment_text}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {llmAssessment ? (
+            <div className="space-y-4">
+              {/* LLM Metadata stats */}
+              <div className="grid grid-cols-3 gap-2 p-3 bg-surface-alt rounded-lg border border-border text-[10px] text-text-secondary">
+                <div>Model: <strong className="text-text-primary">{llmAssessment.model}</strong></div>
+                <div>Latency: <strong className="text-text-primary">{llmAssessment.latency}s</strong></div>
+                <div>Tokens (I/O): <strong className="text-text-primary">{llmAssessment.input_tokens}/{llmAssessment.output_tokens}</strong></div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">Augmented Detailed Analysis</h3>
+                <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">{llmAssessment.response}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="p-6 bg-surface-alt rounded-lg border border-border text-center">
+              <p className="text-xs text-text-secondary">No LLM augmented assessment generated for this version.</p>
+            </div>
+          )}
         </div>
       )}
-
-      <div className="space-y-3">
-        <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">Detailed Analysis</h3>
-        <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">{assessment_text}</p>
-      </div>
 
       {generated_at && (
         <div className="text-[10px] text-text-muted pt-2 border-t border-border flex justify-between">
