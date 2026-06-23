@@ -1,12 +1,13 @@
 # News Intelligence Backend
 
-Deterministic, rule-based Python backend for ingesting and analyzing news signals.
+Deterministic, rule-based Python backend for ingesting and analyzing news signals, with optional LLM augmentation via local Ollama.
 
 ## Tech Stack
 
 - FastAPI
 - SQLAlchemy ORM
-- PostgreSQL (Supabase compatible)
+- PostgreSQL / SQLite
+- Ollama + Qwen2.5:3b (optional LLM augmentation)
 
 ## Project Structure
 
@@ -14,28 +15,92 @@ Deterministic, rule-based Python backend for ingesting and analyzing news signal
 - `preprocessing/` - text cleaning and normalization
 - `clustering/` - rule-based grouping logic
 - `timeline/` - chronological ordering
-- `expansion/` - deterministic keyword expansion
+- `expansion/` - deterministic keyword expansion and assessment engine
 - `impact/` - rule-based impact scoring
-- `signal/` - keyword-driven signal extraction
+- `signal_detection/` - keyword-driven signal extraction
+- `evaluation/` - quality metrics and validation framework
+- `services/` - LLM augmentation service (Ollama integration)
 - `api/` - FastAPI app and routers
 - `database/` - settings, engine, and session setup
 - `models/` - SQLAlchemy models
 - `utils/` - shared deterministic utilities
+- `tests/` - integration tests
 
 ## Setup
 
 1. Create virtual environment:
-   - `python -m venv .venv`
-   - `.venv\Scripts\activate` (Windows PowerShell)
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate    # Windows PowerShell
+   ```
+
 2. Install dependencies:
-   - `pip install -r requirements.txt`
+   ```bash
+   pip install -r requirements.txt
+   ```
+
 3. Configure environment:
-   - `copy .env.example .env`
-   - Update DB values for your Supabase project.
+   ```bash
+   copy .env.example .env
+   ```
+   Update DB values and LLM settings as needed.
+
 4. Run API:
-   - `uvicorn api.main:app --reload`
+   ```bash
+   uvicorn api.main:app --reload
+   ```
+
+## LLM Augmentation (Optional)
+
+The deterministic intelligence pipeline is the primary analysis engine. The LLM layer is an **optional augmentation** that enhances natural-language synthesis of assessments, scenarios, alternatives, and summaries.
+
+### Setup Ollama
+
+1. **Install Ollama**:
+   - Download from [ollama.com](https://ollama.com/) or run:
+     ```bash
+     winget install Ollama.Ollama
+     ```
+
+2. **Pull the model**:
+   ```bash
+   ollama pull qwen2.5:3b
+   ```
+
+3. **Verify Ollama is running**:
+   ```bash
+   curl http://localhost:11434/api/tags
+   ```
+
+### Configure LLM Mode
+
+In your `.env` file:
+
+```env
+# Set to "local" to enable Ollama augmentation, "disabled" to use deterministic only
+LLM_SERVICE_MODE=local
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_URL=http://localhost:11434/api/generate
+OLLAMA_TIMEOUT=120
+```
+
+| Mode       | Behavior                                              |
+|------------|-------------------------------------------------------|
+| `disabled` | LLM bypassed entirely, deterministic output only      |
+| `local`    | Augments output via local Ollama + Qwen2.5:3b         |
+
+### Run LLM Tests
+
+```bash
+python tests/test_ollama.py
+```
+
+### Fallback Behavior
+
+If the LLM is unavailable (Ollama not running, timeout, or malformed response), the system **automatically falls back** to the deterministic output. The pipeline never crashes due to an LLM failure.
 
 ## Notes
 
-- No LLM dependencies are used.
-- All current module stubs are deterministic and rule-based by design.
+- The deterministic intelligence system is the primary engine.
+- The LLM acts only as an augmentation layer for natural-language synthesis.
+- No external APIs, no cloud inference, no LangChain.
