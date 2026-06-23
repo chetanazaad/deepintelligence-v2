@@ -19,7 +19,7 @@ Deterministic, rule-based Python backend for ingesting and analyzing news signal
 - `impact/` - rule-based impact scoring
 - `signal_detection/` - keyword-driven signal extraction
 - `evaluation/` - quality metrics and validation framework
-- `services/` - LLM augmentation service (Ollama integration)
+- `services/` - unified LLM intelligence generation engine
 - `api/` - FastAPI app and routers
 - `database/` - settings, engine, and session setup
 - `models/` - SQLAlchemy models
@@ -53,6 +53,38 @@ Deterministic, rule-based Python backend for ingesting and analyzing news signal
 ## LLM Augmentation (Optional)
 
 The deterministic intelligence pipeline is the primary analysis engine. The LLM layer is an **optional augmentation** that enhances natural-language synthesis of assessments, scenarios, alternatives, and summaries.
+
+### Unified Intelligence Engine
+
+The LLM service uses a **single unified call** (`generate_intelligence_package()`) instead of multiple independent calls, producing a complete intelligence package in one pass:
+
+```
+Evidence + Signals + Impacts + Goal
+         ↓
+   Single Ollama Call (~12s)
+         ↓
+   Validated JSON Package
+```
+
+**Output schema:**
+```json
+{
+    "executive_summary": "",
+    "assessment": "",
+    "confidence": "",
+    "risks": [],
+    "opportunities": [],
+    "alternative_explanations": [],
+    "future_scenarios": [],
+    "knowledge_gaps": [],
+    "key_entities": [],
+    "recommendations": []
+}
+```
+
+### Prompt Cache
+
+Identical evidence submissions are automatically cached using SHA-256 prompt hashing. Cached responses return instantly without hitting Ollama.
 
 ### Setup Ollama
 

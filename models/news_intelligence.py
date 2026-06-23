@@ -687,3 +687,24 @@ class LLMAssessment(Base):
     assessment: Mapped["IntelligenceAssessment"] = relationship("IntelligenceAssessment")
 
 
+class LLMCache(Base):
+    """Prompt-hash cache for the unified intelligence generation engine.
+
+    Stores validated LLM responses keyed by SHA-256 hash of the prompt
+    so that identical evidence never triggers a redundant Ollama call.
+    """
+
+    __tablename__ = "llm_cache"
+    __table_args__ = (
+        Index("ix_llm_cache_prompt_hash", "prompt_hash", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    prompt_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    response_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    latency: Mapped[float] = mapped_column(Float, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
