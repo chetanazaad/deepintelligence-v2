@@ -27,7 +27,7 @@ export default function GapPanel({ gaps }) {
             <div className="space-y-1">
               {criticalGaps.map((gap, i) => (
                 <div key={i} className="p-2.5 bg-red/5 border border-red/20 rounded text-xs text-red">
-                  {gap} details missing or uncorroborated.
+                  {typeof gap === 'string' ? gap : `${gap?.category || 'Unknown'}: ${gap?.reason || JSON.stringify(gap)}`} details missing or uncorroborated.
                 </div>
               ))}
             </div>
@@ -41,7 +41,7 @@ export default function GapPanel({ gaps }) {
             <div className="space-y-1">
               {moderateGaps.map((gap, i) => (
                 <div key={i} className="p-2.5 bg-amber/5 border border-amber/20 rounded text-xs text-amber">
-                  {gap} relations unverified.
+                  {typeof gap === 'string' ? gap : `${gap?.category || 'Unknown'}: ${gap?.reason || JSON.stringify(gap)}`} relations unverified.
                 </div>
               ))}
             </div>
@@ -55,7 +55,7 @@ export default function GapPanel({ gaps }) {
             <div className="space-y-1">
               {minorGaps.map((gap, i) => (
                 <div key={i} className="p-2.5 bg-green/5 border border-green/20 rounded text-xs text-green">
-                  {gap} context covered.
+                  {typeof gap === 'string' ? gap : `${gap?.category || 'Unknown'}: ${gap?.reason || JSON.stringify(gap)}`} context covered.
                 </div>
               ))}
             </div>

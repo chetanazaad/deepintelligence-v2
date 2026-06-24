@@ -1,124 +1,132 @@
-import { useState, useEffect } from 'react';
-import {
-  searchEvents,
-  listGoals,
-  getGoalDetails,
-  getLatestAssessment,
-  getLeadQueue,
-  getEvaluationStatus,
-  getLlmAssessment
-} from './api';
-
-import SearchBar from './components/SearchBar';
-import EventCard from './components/EventCard';
-import IntelligenceAssessmentCard from './components/IntelligenceAssessmentCard';
-import EvidencePanel from './components/EvidencePanel';
-import GapPanel from './components/GapPanel';
-import ScenarioPanel from './components/ScenarioPanel';
-import GoalPanel from './components/GoalPanel';
-import ResearchPanel from './components/ResearchPanel';
-import AlternativeExplanations from './components/AlternativeExplanations';
-import EvaluationPanel from './components/EvaluationPanel';
-import GraphPanel from './components/GraphPanel';
-import ValidationDashboard from './components/ValidationDashboard';
+import { useState, useEffect, useRef } from 'react';
+import { analyzeNews, getAnalysisStatus } from './api';
+import NewsInputPanel from './components/NewsInputPanel';
+import IntelligenceReport from './components/IntelligenceReport';
 
 export default function App() {
-  // Navigation & Workspace Toggles
-  const [currentView, setCurrentView] = useState('intelligence'); // 'intelligence' | 'validation'
-  
-  // Navigation & Search
-  const [results, setResults] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [query, setQuery] = useState('');
-
-  // Intelligence Core State
-  const [goals, setGoals] = useState([]);
-  const [selectedGoalId, setSelectedGoalId] = useState(null);
-  const [goalDetails, setGoalDetails] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [pipelineSteps, setPipelineSteps] = useState(null);
+  const [llmStatus, setLlmStatus] = useState('disabled');
+  const [llmError, setLlmError] = useState(null);
   const [assessment, setAssessment] = useState(null);
-  const [llmAssessment, setLlmAssessmentState] = useState(null);
-  const [leads, setLeads] = useState([]);
-  const [systemHealth, setSystemHealth] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [processingTime, setProcessingTime] = useState(null);
+  const [error, setError] = useState(null);
 
-  // Initial loading of goals, leads, and system health
+  const pollIntervalRef = useRef(null);
+
+  // Clear polling interval on unmount
   useEffect(() => {
-    async function loadInitialData() {
-      try {
-        const goalsData = await listGoals();
-        setGoals(goalsData.goals || []);
-        if (goalsData.goals?.length > 0) {
-          setSelectedGoalId(goalsData.goals[0].id);
-        }
-
-        const leadsData = await getLeadQueue();
-        setLeads(leadsData.queue || []);
-
-        const healthData = await getEvaluationStatus();
-        setSystemHealth(healthData);
-      } catch (err) {
-        console.error('Failed to load initial workspace data:', err);
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
       }
-    }
-    loadInitialData();
+    };
   }, []);
 
-  // Fetch goal details & latest assessment whenever selectedGoalId changes
-  useEffect(() => {
-    if (!selectedGoalId) return;
-
-    async function loadGoalData() {
-      try {
-        const details = await getGoalDetails(selectedGoalId);
-        setGoalDetails(details);
-
-        // Fetch latest assessment for this goal
-        try {
-          const ass = await getLatestAssessment(selectedGoalId);
-          setAssessment(ass);
-          
-          // Try fetching LLM assessment
-          try {
-            const llm = await getLlmAssessment(selectedGoalId);
-            setLlmAssessmentState(llm);
-          } catch {
-            setLlmAssessmentState(null);
-          }
-        } catch {
-          // If no assessment exists yet, reset state
-          setAssessment(null);
-          setLlmAssessmentState(null);
-        }
-      } catch (err) {
-        console.error(`Failed to load data for goal ${selectedGoalId}:`, err);
-      }
-    }
-    loadGoalData();
-  }, [selectedGoalId]);
-
-  const handleSearch = async (q) => {
-    setLoading(true);
+  const handleAnalyze = async (title, content, useLlm) => {
+    setIsAnalyzing(true);
     setError(null);
-    setQuery(q);
+    setLlmError(null);
+    setPipelineSteps(null);
+    setProcessingTime(null);
+
+    // Provide immediate mock/loading progress sequence for deterministic pipeline steps
+    // while the server executes the synchronous call.
+    const steps = {
+      ingestion: { status: 'running' },
+      preprocessing: { status: 'pending' },
+      clustering: { status: 'pending' },
+      timeline: { status: 'pending' },
+      expansion: { status: 'pending' },
+      impact: { status: 'pending' },
+      signals: { status: 'pending' },
+      assessment: { status: 'pending' },
+    };
+    setPipelineSteps(steps);
+
     try {
-      const data = await searchEvents(q);
-      setResults(data.results || []);
-      if (data.results?.length > 0) {
-        setSelectedEvent(data.results[0].event || null);
-      } else {
-        setError('No events found. Try a different search term.');
+      const response = await analyzeNews(title, content, useLlm);
+
+      // Handle structured pipeline failure
+      if (response.status === 'failed') {
+        setPipelineSteps(response.pipeline || steps);
+        const errMsg = response.failed_step
+          ? `Pipeline failed at step "${response.failed_step}": ${response.error}`
+          : response.error || 'Pipeline failed without a specific error.';
+        setError(errMsg);
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Update pipeline steps from response
+      const updatedSteps = { ...steps };
+      Object.keys(response.pipeline || {}).forEach((key) => {
+        if (updatedSteps[key]) {
+          updatedSteps[key] = response.pipeline[key];
+        }
+      });
+      // Mark all deterministic steps as OK
+      Object.keys(updatedSteps).forEach((key) => {
+        if (updatedSteps[key].status === 'running' || updatedSteps[key].status === 'pending') {
+          updatedSteps[key].status = 'ok';
+        }
+      });
+      setPipelineSteps(updatedSteps);
+
+      // Set initial results
+      setAssessment(response.assessment);
+      setStats(response.stats);
+      setProcessingTime(response.stats?.processing_time);
+
+      const llmPipelineStatus = response.pipeline?.llm?.status;
+      const llmEffectivelyRunning = useLlm && llmPipelineStatus !== 'disabled';
+      setLlmStatus(llmEffectivelyRunning ? 'running' : 'disabled');
+      setIsAnalyzing(false);
+
+      if (llmEffectivelyRunning && response.analysis_id) {
+        startPolling(response.analysis_id);
       }
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Failed to fetch. Is the backend running?');
-      setResults([]);
-      setSelectedEvent(null);
+      console.error(err);
+      setError(err?.response?.data?.detail || 'Failed to complete deterministic intelligence pipeline.');
+      setIsAnalyzing(false);
     }
-    setLoading(false);
+  };
+
+  const startPolling = (analysisId) => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+    }
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const statusData = await getAnalysisStatus(analysisId);
+        
+        // Update live assessment objects as they refine
+        if (statusData.assessment) {
+          setAssessment(statusData.assessment);
+        }
+        
+        setLlmStatus(statusData.llm_status);
+
+        if (statusData.llm_status === 'completed') {
+          clearInterval(pollIntervalRef.current);
+        } else if (statusData.llm_status === 'failed') {
+          setLlmError(statusData.llm_error || 'LLM generation failed.');
+          clearInterval(pollIntervalRef.current);
+        }
+      } catch (err) {
+        console.error('Polling failed:', err);
+        setLlmStatus('failed');
+        setLlmError('Connection error polling intelligence status.');
+        clearInterval(pollIntervalRef.current);
+      }
+    }, 1500);
   };
 
   return (
-    <div className="min-h-screen bg-surface flex flex-col pb-16">
+    <div className="min-h-screen bg-surface flex flex-col">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-surface/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
@@ -130,104 +138,41 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-text-primary tracking-tight">DeepDive Intelligence</h1>
-              <p className="text-xs text-text-muted">Intelligence Analysis Platform</p>
+              <p className="text-xs text-text-muted">Analyst Workspace</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <nav className="flex gap-1 p-1 bg-surface-alt rounded-lg border border-border">
-              <button
-                onClick={() => setCurrentView('intelligence')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded transition-all cursor-pointer ${currentView === 'intelligence' ? 'bg-surface-card text-accent' : 'text-text-muted hover:text-text-secondary'}`}
-              >
-                💼 WORKSPACE
-              </button>
-              <button
-                onClick={() => setCurrentView('validation')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded transition-all cursor-pointer ${currentView === 'validation' ? 'bg-surface-card text-accent' : 'text-text-muted hover:text-text-secondary'}`}
-              >
-                🛡️ VALIDATION
-              </button>
-            </nav>
-            <div className="w-80">
-              <SearchBar onSearch={handleSearch} loading={loading} />
-            </div>
+          <div className="text-xs text-text-secondary bg-surface-alt px-3 py-1.5 rounded-lg border border-border">
+            🟢 Workspace Online
           </div>
         </div>
       </header>
 
-      {/* Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Error notification */}
-        {error && (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-red-bg border border-red/20 text-red text-sm">
-            <span>⚠️</span>
-            <span>{error}</span>
-          </div>
-        )}
-
-        {currentView === 'validation' ? (
-          <ValidationDashboard />
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* LEFT COLUMN: Events & Goals */}
-          <div className="lg:col-span-1 space-y-6">
-            {results.length > 0 && (
-              <div className="bg-surface-card border border-border rounded-xl p-4 space-y-3">
-                <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">Related Events</h3>
-                <div className="space-y-2 max-h-[250px] overflow-y-auto">
-                  {results.map((res, i) => (
-                    <EventCard
-                      key={res.event?.node_id || i}
-                      event={res.event}
-                      isSelected={selectedEvent?.node_id === res.event?.node_id}
-                      onClick={() => setSelectedEvent(res.event)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <GoalPanel
-              goals={goals}
-              selectedGoalId={selectedGoalId}
-              onSelectGoal={setSelectedGoalId}
+      {/* Main Workspace Layout */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Column - Input Panel */}
+          <div className="lg:col-span-4 bg-surface-card border border-border rounded-xl p-5">
+            <NewsInputPanel
+              onAnalyze={handleAnalyze}
+              isAnalyzing={isAnalyzing}
+              pipelineSteps={pipelineSteps}
+              llmStatus={llmStatus}
+              processingTime={processingTime}
+              error={error}
             />
           </div>
 
-          {/* CENTER COLUMN: Intelligence Assessment & Evidence */}
-          <div className="lg:col-span-2 space-y-6">
-            <IntelligenceAssessmentCard
+          {/* Right Column - Intelligence Report */}
+          <div className="lg:col-span-8">
+            <IntelligenceReport
               assessment={assessment}
-              llmAssessment={llmAssessment}
-              goalQuestion={goalDetails?.goal_question || 'No Active Goal Selected'}
+              stats={stats}
+              llmStatus={llmStatus}
+              llmError={llmError}
             />
-
-            <EvidencePanel evidenceSummary={assessment?.evidence_summary} />
-
-            <GraphPanel
-              centerNode={selectedEvent || (goalDetails ? { entity: goalDetails.keywords?.[0] || 'Investigation Target', entity_type: 'Concept' } : null)}
-              evidence={assessment?.evidence_summary}
-              goals={goals}
-              scenarios={assessment?.future_scenarios}
-            />
-          </div>
-
-          {/* RIGHT COLUMN: Gaps, Scenarios & Alternative Hypotheses */}
-          <div className="lg:col-span-1 space-y-6">
-            <GapPanel gaps={assessment?.knowledge_gaps || goalDetails?.gap_analysis} />
-
-            <AlternativeExplanations explanations={assessment?.alternative_explanations} />
-
-            <ScenarioPanel scenarios={assessment?.future_scenarios} />
-
-            <ResearchPanel leads={leads} />
           </div>
         </div>
-      )}
-    </main>
-
-      {/* Developer Health Panel */}
-      <EvaluationPanel statusData={systemHealth} />
+      </main>
     </div>
   );
 }

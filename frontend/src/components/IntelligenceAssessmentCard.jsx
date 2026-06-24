@@ -75,7 +75,11 @@ export default function IntelligenceAssessmentCard({ assessment, llmAssessment, 
           {executive_summary && (
             <div className="p-4 bg-surface-alt rounded-lg border border-border">
               <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">Executive Summary</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">{executive_summary}</p>
+              <p className="text-sm text-text-secondary leading-relaxed">
+                {typeof executive_summary === 'string' 
+                  ? executive_summary 
+                  : (executive_summary?.key_findings || JSON.stringify(executive_summary))}
+              </p>
             </div>
           )}
 
